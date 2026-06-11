@@ -27,7 +27,7 @@
 | Retries | tenacity |
 | Logging | structlog |
 | Testing | pytest + pytest-asyncio + httpx |
-| Test mocks | pytest-asyncio + respx + testing DB |
+| Test mocks | pytest-postgresql + fakeredis + respx |
 | Infra | Docker + Compose |
 
 ---

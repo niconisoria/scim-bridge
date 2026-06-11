@@ -33,12 +33,11 @@ postgres:
     retries: 5
 ```
 
-### Redis — AOF persistence (rate limiter coordination only)
+### Redis
 
 ```yaml
 redis:
   image: redis:7-alpine
-  command: redis-server --appendonly yes
   healthcheck:
     test: ["CMD", "redis-cli", "ping"]
     interval: 5s
