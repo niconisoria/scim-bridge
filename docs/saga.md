@@ -1,6 +1,6 @@
 # Saga Orchestrator
 
-All multi-step Brivo provisioning operations use the saga pattern. Each operation defines ordered forward steps and compensating (rollback) steps. State persisted in Redis (→ [redis.md](redis.md)) before execution begins.
+All multi-step target provisioning operations use the saga pattern. Each operation defines ordered forward steps and compensating (rollback) steps. State persisted in PostgreSQL `provisioning_actions` table (→ [database.md](database.md)) before execution begins.
 
 ## State Machine
 
@@ -17,7 +17,9 @@ After 3 failures: mark step `failed`, trigger rollback.
 
 ## Orphaned Sagas on Restart
 
-If the bridge restarts while a saga is `running`, the saga remains in Redis with status `running` but no process will resume it. On restart, the bridge does **not** auto-resume in-progress sagas — behavior relies on Okta retrying the operation. The retry hits the create pre-check (step 0), which queries Brivo by `externalId` to detect partial state and recover or clean up before proceeding.
+If the bridge restarts while a saga is `running`, the row remains in `provisioning_actions` with status `running` but no process will resume it. On restart, the bridge does **not** auto-resume in-progress sagas — behavior relies on the IdP retrying the operation. The retry hits the create pre-check (step 0), which attempts `INSERT ... (status='pending')` into `integrations`. The existing `pending` row (from the crashed saga) blocks via UNIQUE constraint → return `409`.
+
+Cleanup: startup task marks stale `running` sagas as `failed` and deletes associated `pending` integration rows. See [database.md § Orphaned Sagas](database.md).
 
 ## Operations
 
@@ -25,59 +27,59 @@ If the bridge restarts while a saga is `running`, the saga remains in Redis with
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | Check `ext:user:{external_id}` in Redis — if found return `409`. If miss: query Brivo `GET /users?externalId={external_id}` — if found rebuild mapping + return `409`. | — |
-| 1 | `POST /brivo/users` → save `brivo_id` to saga state | `DELETE /brivo/users/{brivo_id}` |
-| 2 | Write `scim:user:{scim_id}` → `{brivo_id, external_id}` and `ext:user:{external_id}` → `scim_id` to Redis | Delete both Redis keys |
+| 0 | `INSERT INTO integrations (target, resource_type, external_id, scim_id, status='pending')` — `UniqueViolationError` → `409`. Record saga in `provisioning_actions`. | — |
+| 1 | `POST /target/users` → save `target_id` to saga steps JSONB | `DELETE /target/users/{target_id}` |
+| 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE integration row; invalidate Redis cache |
 
 ### Delete User
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Fetch user's Brivo group memberships; save list to saga state | Re-add user to each group |
-| 2 | `DELETE` user from each Brivo group | (covered by step 1 rollback) |
-| 3 | `DELETE /brivo/users/{brivo_id}` | **Not recoverable** — log structured alert |
-| 4 | Read `external_id` from `scim:user:{scim_id}` value; delete `scim:user:{scim_id}` and `ext:user:{external_id}` | Restore both Redis keys |
+| 1 | Fetch user's target group memberships; save list to saga steps JSONB | Re-add user to each group |
+| 2 | `DELETE` user from each target group | (covered by step 1 rollback) |
+| 3 | `DELETE /target/users/{target_id}` | **Not recoverable** — log structured alert |
+| 4 | `DELETE FROM integrations WHERE ...`. Invalidate Redis cache. | Restore integration row; repopulate cache |
 
-> Step 3 rollback is unrecoverable. Saga marks `failed`, emits error log with `saga_id`. Okta must retry the full provisioning cycle.
+> Step 3 rollback is unrecoverable. Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
 
 ### Delete Group
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | `DELETE /brivo/groups/{brivo_group_id}` | **Not recoverable** — log structured alert |
-| 2 | Read `external_id` from `scim:group:{scim_id}` value; delete `scim:group:{scim_id}` and `ext:group:{external_id}` | Restore both Redis keys |
+| 1 | `DELETE /target/groups/{target_group_id}` | **Not recoverable** — log structured alert |
+| 2 | `DELETE FROM integrations WHERE ...`. Invalidate Redis cache. | Restore integration row; repopulate cache |
 
-> Step 1 rollback is unrecoverable (group gone from Brivo). Saga marks `failed`, emits error log with `saga_id`. Okta must retry the full provisioning cycle.
+> Step 1 rollback is unrecoverable (group gone from target). Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
 
-> Unlike Delete User, group membership cleanup is not needed — Brivo removes all member associations when a group is deleted.
+> Unlike Delete User, group membership cleanup is not needed — target removes all member associations when a group is deleted.
 
 ### Create Group (with members)
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | Check `ext:group:{external_id}` in Redis — if found return `409`. If miss: query Brivo `GET /groups?externalId={external_id}` — if found rebuild mapping + return `409`. | — |
-| 1 | `POST /brivo/groups` → save `brivo_group_id` to saga state | `DELETE /brivo/groups/{brivo_group_id}` |
-| 2 | Write `scim:group:{scim_id}` → `{brivo_group_id, external_id}` and `ext:group:{external_id}` → `scim_id` to Redis | Delete both Redis keys |
-| 3 | For each member: resolve `scim_user_id` → `brivo_user_id` from Redis (if missing → `400`, abort before step 3 starts); `PUT /v1/api/groups/{groupId}/users/{userId}`; append `userId` to `saga.steps[3].added_members` in Redis after each success | `DELETE /v1/api/groups/{groupId}/users/{userId}` for each ID in `added_members` in reverse |
+| 0 | `INSERT INTO integrations (target, resource_type='group', external_id, scim_id, status='pending')` — `UniqueViolationError` → `409`. Record saga in `provisioning_actions`. | — |
+| 1 | `POST /target/groups` → save `target_group_id` to saga steps JSONB | `DELETE /target/groups/{target_group_id}` |
+| 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE integration row; invalidate Redis cache |
+| 3 | For each member: resolve `scim_user_id` → `target_user_id` from DB/cache (if missing → `400`, abort before step 3 starts); `PUT /target/groups/{groupId}/users/{userId}`; append `userId` to `saga.steps[3].added_members` in JSONB after each success | `DELETE /target/groups/{groupId}/users/{userId}` for each ID in `added_members` in reverse |
 
-> Step 3 member resolution: if any `scim_user_id` has no Redis mapping, the entire saga aborts before executing any Brivo member calls — return `400` to caller.
+> Step 3 member resolution: if any `scim_user_id` has no integration mapping, the entire saga aborts before executing any target member calls — return `400` to caller.
 
-> Step 3 rollback uses `added_members` accumulated in saga state to know exactly which members were successfully added before the failure.
+> Step 3 rollback uses `added_members` accumulated in saga steps JSONB to know exactly which members were successfully added before the failure.
 
 ### Add Member to Group (PATCH `add`)
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Resolve `scim_user_id` → `brivo_user_id` from Redis; if missing → `400` | — |
-| 2 | `PUT /v1/api/groups/{brivo_group_id}/users/{brivo_user_id}` | `DELETE /v1/api/groups/{brivo_group_id}/users/{brivo_user_id}` |
+| 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
+| 2 | `PUT /target/groups/{target_group_id}/users/{target_user_id}` | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` |
 
 ### Remove Member from Group (PATCH `remove`)
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Resolve `scim_user_id` → `brivo_user_id` from Redis; if missing → `400` | — |
-| 2 | `DELETE /v1/api/groups/{brivo_group_id}/users/{brivo_user_id}` | `PUT /v1/api/groups/{brivo_group_id}/users/{brivo_user_id}` |
+| 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
+| 2 | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` | `PUT /target/groups/{target_group_id}/users/{target_user_id}` |
 
 ### Update User / Group (PUT or PATCH `replace`)
 
-Single Brivo call — no saga needed. `tenacity` retries directly. Idempotent by design.
+Single target call — no saga needed. `tenacity` retries directly. Idempotent by design.

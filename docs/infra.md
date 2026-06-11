@@ -8,15 +8,33 @@ Docker Compose topology for local development and integration testing.
 |---|---|---|---|
 | `app` | `./Dockerfile` | `8000` | SCIM Bridge (FastAPI + Uvicorn) |
 | `mock-brivo` | `./Dockerfile.brivo` | `8001` | Mock Brivo API |
-| `redis` | `redis:7-alpine` | `6379` | Shared state — AOF persistence required (`--appendonly yes`) |
+| `postgres` | `postgres:16-alpine` | `5432` | ID mappings + provisioning audit trail |
+| `redis` | `redis:7-alpine` | `6379` | Cache + rate-limiter coordination |
 
-`app` depends on `redis` and `mock-brivo` with `condition: service_healthy`. `mock-brivo` has no dependencies.
-
-> Redis data loss = all `scim_id ↔ brivo_id` mappings lost. Full re-sync from Brivo required. AOF persistence is non-negotiable.
+`app` depends on `postgres`, `redis`, and `mock-brivo` with `condition: service_healthy`. `mock-brivo` has no dependencies.
 
 ## Docker Compose Config Notes
 
-### Redis — AOF persistence
+### postgres
+
+```yaml
+postgres:
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_USER: scim
+    POSTGRES_PASSWORD: scim
+    POSTGRES_DB: scimbridge
+  volumes:
+    - postgres_data:/var/lib/postgresql/data
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U scim -d scimbridge"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+```
+
+### Redis — AOF persistence (rate limiter coordination only)
+
 ```yaml
 redis:
   image: redis:7-alpine
@@ -29,6 +47,7 @@ redis:
 ```
 
 ### mock-brivo healthcheck
+
 ```yaml
 mock-brivo:
   healthcheck:
@@ -39,9 +58,12 @@ mock-brivo:
 ```
 
 ### app depends_on
+
 ```yaml
 app:
   depends_on:
+    postgres:
+      condition: service_healthy
     redis:
       condition: service_healthy
     mock-brivo:
@@ -53,6 +75,7 @@ app:
 | Variable | Service | Description |
 |---|---|---|
 | `SCIM_BEARER_TOKEN` | app | Bearer token Okta sends |
+| `DATABASE_URL` | app | `postgresql+asyncpg://scim:scim@postgres:5432/scimbridge` |
 | `REDIS_URL` | app | `redis://redis:6379` |
 | `BRIVO_BASE_URL` | app | `http://mock-brivo:8001` |
 | `BRIVO_RATE_LIMIT` | app, mock-brivo | Requests/sec limit (default `20`) |

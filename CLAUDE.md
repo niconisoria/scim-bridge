@@ -12,21 +12,23 @@
 
 ## Tech Stack
 
-| Layer         | Choice                             |
-|---------------|------------------------------------|
-| Language      | Python 3.14                        |
-| Framework     | FastAPI                            |
-| Server        | Uvicorn                            |
-| Validation    | Pydantic v2                        |
-| Settings      | pydantic-settings                  |
-| Cache / State | Redis (redis-py asyncio)           |
-| HTTP client   | httpx (AsyncClient)                |
+| Layer | Choice |
+|---|---|
+| Language | Python 3.14 |
+| Framework | FastAPI |
+| Server | Uvicorn |
+| Validation | Pydantic v2 |
+| Settings | pydantic-settings |
+| Database | PostgreSQL + SQLAlchemy 2.0 (async) + asyncpg |
+| Migrations | Alembic |
+| Cache / Rate limiting | Redis (redis-py asyncio) |
+| HTTP client | httpx (AsyncClient) |
 | Rate limiting | aiolimiter (token bucket) + Redis (cross-process) |
-| Retries       | tenacity                           |
-| Logging       | structlog                          |
-| Testing       | pytest + pytest-asyncio + httpx    |
-| Test mocks    | fakeredis + respx                  |
-| Infra         | Docker + Compose                   |
+| Retries | tenacity |
+| Logging | structlog |
+| Testing | pytest + pytest-asyncio + httpx |
+| Test mocks | pytest-asyncio + respx + testing DB |
+| Infra | Docker + Compose |
 
 ---
 
@@ -36,6 +38,8 @@
 scim-bridge/
 ├── CLAUDE.md               ← you are here
 ├── main.py                 ← FastAPI app entry point
+├── alembic/                ← migration scripts
+│   └── versions/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── docs/
@@ -45,8 +49,9 @@ scim-bridge/
 │   ├── routers/            ← SCIM endpoints (users, groups)
 │   ├── models/             ← Pydantic schemas (SCIM resources)
 │   ├── services/           ← SCIM logic, saga orchestrator
-│   ├── brivo/              ← mock Brivo client + rate limiter
-│   ├── redis/              ← ID mapping cache, saga state, rate-limiter coordination
+│   ├── brivo/              ← Brivo client + rate limiter
+│   ├── db/                 ← SQLAlchemy models, session, repositories
+│   ├── redis/              ← cache layer, rate-limiter coordination
 │   └── core/               ← config, auth middleware, error handlers, logging
 ├── tests/
 │   ├── unit/
@@ -56,14 +61,25 @@ scim-bridge/
 
 ---
 
+## Roles
+
+| Actor | Role | ID field |
+|---|---|---|
+| Okta (IdP) | Initiates provisioning | `external_id` |
+| Bridge | SCIM intermediary | `scim_id` |
+| Brivo (target) | Receives provisioning actions | `target_id` |
+
+---
+
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md) — global system view, components, constraints
+- [docs/database.md](docs/database.md) — schema, migrations, access patterns
 - [docs/scim-server.md](docs/scim-server.md) — SCIM 2.0 endpoints, schemas, auth, field mapping
 - [docs/brivo-mock.md](docs/brivo-mock.md) — mock Brivo API, failure simulation
 - [docs/rate-limiter.md](docs/rate-limiter.md) — token bucket, Redis coordination, 429 handling
 - [docs/saga.md](docs/saga.md) — saga state machine, all multi-step operations
-- [docs/redis.md](docs/redis.md) — key inventory, TTL strategy, access patterns
+- [docs/redis.md](docs/redis.md) — cache key inventory, TTL strategy, access patterns
 - [docs/logging.md](docs/logging.md) — structlog fields, levels
 - [docs/testing.md](docs/testing.md) — unit + integration test strategy
 - [docs/infra.md](docs/infra.md) — Docker services, env vars
