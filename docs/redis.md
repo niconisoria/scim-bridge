@@ -1,12 +1,21 @@
 # Redis Integration
 
-Redis serves two concerns: **cache** (hot ID lookups backed by PostgreSQL) and **rate-limiter coordination** (sliding window counter).
+Redis serves as a **cache** for hot integration ID lookups backed by PostgreSQL. DB is always the source of truth.
 
 ID mappings and saga state are owned by PostgreSQL — see [database.md](database.md).
 
-## Key Inventory
+## Cache Effectiveness
 
-### Cache Layer
+Two cache key types serve different access patterns:
+
+| Key type | Used by | Repetition | Value |
+|---|---|---|---|
+| `cache:ext` (`external_id` → `scim_id`) | GET /Groups list — member hydration; GET /Users list — Brivo→SCIM resolution | N groups × M members per request; same users appear across multiple groups | **High** — hot keys hit many times per list request |
+| `cache:scim` (`scim_id` → `target_id`) | Create Group saga (member resolution); PATCH add/remove member | N members per create; 1 per PATCH | Medium — saves DB round-trip per member on bulk creates |
+
+Single-resource GETs (`GET /Users/{id}`, `GET /Groups/{id}`) also hit `cache:scim` but at low repetition — DB would be fast enough, cache is a low-cost bonus.
+
+## Key Inventory
 
 | Key | Type | Value | TTL |
 |---|---|---|---|
@@ -15,30 +24,23 @@ ID mappings and saga state are owned by PostgreSQL — see [database.md](databas
 
 `type` is `user` or `group`. `target` is the downstream system identifier (e.g. `brivo`).
 
-Cache-aside pattern: read Redis first; on miss query DB, then write to cache. Invalidated explicitly on resource delete.
-
-### Rate Limiter
-
-| Key | Type | Value | TTL |
-|---|---|---|---|
-| `ratelimit:{target}:window:{unix_second}` | string | integer request count | 2s |
-
-See [rate-limiter.md](rate-limiter.md) for usage pattern.
+**Cache-aside pattern:** read Redis first; on miss query DB, populate cache. Invalidated explicitly on resource delete.
 
 ## Invalidation Rules
 
 | Key pattern | Invalidated by |
 |---|---|
-| `cache:{target}:scim:{type}:{scim_id}` | Delete saga (explicit DEL) |
-| `cache:{target}:ext:{type}:{external_id}` | Delete saga (explicit DEL) |
-| `ratelimit:{target}:window:{ts}` | TTL auto-expires after 2s |
+| `cache:{target}:scim:{type}:{scim_id}` | Delete saga step 4 (explicit DEL) |
+| `cache:{target}:ext:{type}:{external_id}` | Delete saga step 4 (explicit DEL) |
+
+TTL is a safety net — explicit invalidation keeps cache consistent without waiting for expiry.
 
 ## Self-Healing on Target 404
 
 If a target API call returns `404` for a resource that has a DB mapping, the mapping is stale (target mutated out-of-band). Bridge must:
 
-1. Delete the `integrations` row from DB
-2. Delete `cache:{target}:scim:{type}:{scim_id}` and `cache:{target}:ext:{type}:{external_id}` from Redis
+1. DELETE the `integrations` row from DB
+2. DEL both cache keys from Redis
 3. Return `404` to caller
 
 ## Access Patterns
@@ -47,6 +49,5 @@ If a target API call returns `404` for a resource that has a DB mapping, the map
 |---|---|
 | Get resource by `scim_id` | Read `cache:{target}:scim:{type}:{scim_id}` (miss → query DB, populate cache) |
 | Get resource by `external_id` | Read `cache:{target}:ext:{type}:{external_id}` (miss → query DB, populate cache) |
-| Create resource | Populate both cache keys on saga completion |
+| Create resource (saga complete) | Populate both cache keys |
 | Delete resource | DEL both cache keys |
-| Target API call | INCR + EXPIRE `ratelimit:{target}:window:{ts}` |

@@ -25,10 +25,9 @@
 - [ ] #15 Implement `app/db/repositories/saga_store.py` — CRUD: create saga, update step, set terminal status
 - [ ] #16 Implement startup task — mark stale `running` sagas `failed`, delete orphaned `pending` integration rows
 
-## Phase 3 — Redis Layer
+## Phase 3 — Redis Cache Layer
 
 - [ ] #17 Implement `app/redis/cache.py` — cache-aside reads/writes/invalidation for integration lookups
-- [ ] #18 Implement `app/redis/rate_window.py` — sliding window counter
 
 ## Phase 4 — Pydantic Models
 

@@ -21,9 +21,9 @@
 | Settings | pydantic-settings |
 | Database | PostgreSQL + SQLAlchemy 2.0 (async) + asyncpg |
 | Migrations | Alembic |
-| Cache / Rate limiting | Redis (redis-py asyncio) |
+| Cache | Redis (redis-py asyncio) |
 | HTTP client | httpx (AsyncClient) |
-| Rate limiting | aiolimiter (token bucket) + Redis (cross-process) |
+| Rate limiting | aiolimiter (token bucket) |
 | Retries | tenacity |
 | Logging | structlog |
 | Testing | pytest + pytest-asyncio + httpx |

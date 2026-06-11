@@ -12,25 +12,9 @@ Token bucket:
 
 ## Implementation
 
-Two layers, both always active:
+`aiolimiter.AsyncLimiter(max_rate=20, time_period=1)` wraps every outbound Brivo call. Handles queueing within the process — callers `await` token acquisition.
 
-### In-process (primary)
-
-`aiolimiter.AsyncLimiter(max_rate=20, time_period=1)` wraps every outbound Brivo call. Handles queueing within a single process — callers `await` token acquisition.
-
-`max_rate` reads from `BRIVO_RATE_LIMIT` env var (default `20`). Same value used by the Redis sliding window counter and the mock's rate-limit signal.
-
-### Redis (cross-process coordination)
-
-Sliding window counter runs alongside the token bucket as a cross-process guard:
-
-1. Atomic `INCR ratelimit:brivo:window:{unix_second}`
-2. `EXPIRE` key to 2s on first write (pipelined with INCR)
-3. If counter > 20: sleep until next second boundary, then retry
-
-For the current single-instance deployment, `aiolimiter` does the heavy lifting. Redis coordination is a safety net and supports future horizontal scaling without code changes.
-
-Redis key structure → [redis.md](redis.md).
+`max_rate` reads from `BRIVO_RATE_LIMIT` env var (default `20`). Same value used by the mock's rate-limit signal.
 
 ## Brivo 429 Handling
 
