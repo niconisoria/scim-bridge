@@ -64,7 +64,7 @@ Audit log of all saga executions.
 | `updated_at` | TIMESTAMPTZ | NOT NULL, default `now()` |
 | `completed_at` | TIMESTAMPTZ | nullable |
 
-**`operation` values:** `create_user`, `delete_user`, `create_group`, `delete_group`, `add_member`, `remove_member`
+**`operation` values:** `create_user`, `delete_user`, `create_group`, `update_group`, `delete_group`, `add_member`, `remove_member`
 
 **`status` values:** `running`, `completed`, `compensating`, `compensated`, `failed`
 

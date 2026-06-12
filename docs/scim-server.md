@@ -95,7 +95,21 @@ Failure → `401` with SCIM error body. Constant-time string comparison.
 }
 ```
 
-Supported `op` values: `add`, `remove`, `replace`.
+Supported `op` values: `add`, `remove`, `replace`. `op` is case-insensitive per RFC 7644 — normalize to lowercase before processing.
+
+#### Multi-Operation Requests
+
+`Operations[]` may contain multiple ops in one request — process sequentially:
+
+- Consecutive `replace` ops on user/group scalar attributes → batch into single read-modify-write Brivo call
+- `add`/`remove` member ops → execute as member operations; may include multiple members per op (see below)
+- Mixed `replace` + member ops → apply attribute update first, then member ops
+
+#### Multi-Value Member Add
+
+`{ "op": "add", "path": "members", "value": [{ "value": "id1" }, { "value": "id2" }] }`
+
+One `add` op may target N members. Resolve all `scim_user_id → target_user_id` upfront (return `400` if any missing), then `PUT /target/groups/{groupId}/users/{userId}` for each.
 
 #### PATCH Path Filter Parsing
 
@@ -121,9 +135,9 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 | Status | When |
 |---|---|
-| `200` | GET, PUT, PATCH success (with response body) |
+| `200` | GET, PUT, PATCH success (with full resource body) |
 | `201` | POST (create) success |
-| `204` | DELETE success; PATCH success (no response body) |
+| `204` | DELETE success |
 | `400` | Invalid request body, unrecognized PATCH path, `displayName` > 35 chars |
 | `401` | Missing / invalid token |
 | `404` | Resource not found |
@@ -147,12 +161,16 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 `userName` has no direct Brivo field — use `emails[0].address` as canonical identity.
 
+**PATCH `replace` write path:** GET current Brivo user → merge replace ops into full user object → PUT complete body. Required because Brivo has no PATCH — all updates are full replaces.
+
 ### Group
 
 | SCIM | Brivo |
 |---|---|
 | `displayName` | `name` (max 35 chars — enforce at validation layer, return `400` if exceeded) |
 | `members[].value` (resolved to Brivo ID) | `PUT /groups/{groupId}/users/{userId}` per member |
+
+**PUT /Groups member reconciliation:** GET current members from Brivo → diff against new `members[]` → execute adds and removes as separate Brivo calls. Multi-step — see [saga.md § Update Group](saga.md).
 
 ### PUT Full-Replace Semantics
 
@@ -252,6 +270,8 @@ Example: `GET /scim/v2/Users?filter=userName eq "john@example.com"&startIndex=1&
 | Create user | Yes → [saga.md § Create User](saga.md) |
 | Delete user | Yes → [saga.md § Delete User](saga.md) |
 | Create group | Yes → [saga.md § Create Group](saga.md) |
-| PATCH add member | Yes → [saga.md § Add Member](saga.md) |
+| PATCH add member(s) | Yes → [saga.md § Add Member](saga.md) |
 | PATCH remove member | Yes → [saga.md § Remove Member](saga.md) |
-| PUT / PATCH replace | No — single Brivo call, tenacity retries |
+| PUT / PATCH replace user | No — read-modify-write Brivo call, tenacity retries |
+| PUT group (full replace) | Yes → [saga.md § Update Group](saga.md) |
+| PATCH replace group attrs | No — read-modify-write Brivo call, tenacity retries |

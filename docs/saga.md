@@ -70,14 +70,16 @@ Router resolves `scim_id` (URL param) → `target_group_id` via DB/cache before 
 
 > Step 3 rollback uses `added_members` accumulated in saga steps JSONB to know exactly which members were successfully added before the failure.
 
-### Add Member to Group (PATCH `add`)
+### Add Member(s) to Group (PATCH `add`)
 
 Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
 
+One `add` op may include N members in `value[]`. Resolve all `scim_user_id → target_user_id` upfront (return `400` if any missing), then execute each as a separate step — same pattern as Create Group step 3.
+
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
-| 2 | `PUT /target/groups/{target_group_id}/users/{target_user_id}` | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` |
+| 1 | Resolve all `scim_user_id → target_user_id` from DB/cache; if any missing → `400` | — |
+| 2 | For each member: `PUT /target/groups/{target_group_id}/users/{target_user_id}`; append `target_user_id` to `added_members` in saga JSONB | `DELETE` each in `added_members` in reverse |
 
 ### Remove Member from Group (PATCH `remove`)
 
@@ -88,6 +90,26 @@ Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache b
 | 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
 | 2 | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` | `PUT /target/groups/{target_group_id}/users/{target_user_id}` |
 
-### Update User / Group (PUT or PATCH `replace`)
+### Update User (PUT or PATCH `replace`)
 
-Single target call — no saga needed. `tenacity` retries directly. Idempotent by design.
+Router resolves `scim_id` → `target_id` via DB/cache before calling Brivo; if missing → `404`.
+
+Read-modify-write — no saga: GET current Brivo user → merge PUT fields or PATCH replace ops into full user object → PUT complete body. `tenacity` retries on failure.
+
+### Update Group (PUT)
+
+Router resolves `scim_id` → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+
+| Step | Forward | Rollback |
+|---|---|---|
+| 1 | `PUT /target/groups/{target_group_id}` with new `name` | `PUT /target/groups/{target_group_id}` with original name |
+| 2 | `GET /target/groups/{target_group_id}/users` → save current member list to saga JSONB | — |
+| 3 | Resolve all new `members[]` `scim_id → target_user_id` (if any missing → `400`, abort) | — |
+| 4 | Add new members: `PUT /target/groups/{target_group_id}/users/{target_user_id}` for each; track in `added_members` | `DELETE` each in `added_members` |
+| 5 | Remove old members: `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each; track in `removed_members` | `PUT` each in `removed_members` back |
+
+### PATCH `replace` Group Attributes
+
+Router resolves `scim_id` → `target_group_id` via DB/cache before calling Brivo; if missing → `404`.
+
+Single Brivo call — no saga: `PUT /target/groups/{target_group_id}` with updated `name`. `tenacity` retries.
