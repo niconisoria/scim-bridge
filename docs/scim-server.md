@@ -137,12 +137,13 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 | SCIM | Brivo |
 |---|---|
-| `externalId` | `externalId` |
 | `name.givenName` | `firstName` |
 | `name.familyName` | `lastName` |
 | `emails[primary].value` | `emails[0].address` |
 | `phoneNumbers[primary].value` | `phoneNumbers[0].number` |
 | `active` | `suspended` (inverted: `active=true` → `suspended=false`) |
+
+`externalId` is stored in the bridge's `integrations` table — not forwarded to Brivo. Brivo has no knowledge of the IdP.
 
 `userName` has no direct Brivo field — use `emails[0].address` as canonical identity.
 
@@ -166,7 +167,7 @@ Applied on every GET, list, PUT/PATCH response.
 | Brivo | SCIM |
 |---|---|
 | resolved via `integrations` table (Redis cache) | `id` (`scim_id`) |
-| `externalId` | `externalId` |
+| resolved via `integrations` table | `externalId` |
 | `firstName` | `name.givenName` |
 | `lastName` | `name.familyName` |
 | `emails[0].address` | `emails[0].value` (`primary: true`); also `userName` |
@@ -180,7 +181,7 @@ Applied on every GET, list, PUT/PATCH response.
 | Brivo | SCIM |
 |---|---|
 | resolved via `integrations` table (Redis cache) | `id` (`scim_id`) |
-| `externalId` | `externalId` |
+| resolved via `integrations` table | `externalId` |
 | `name` | `displayName` |
 | members resolved via `integrations` table (Redis cache) | `members[].value` (`scim_id` per member) |
 
@@ -223,12 +224,17 @@ SCIM and Brivo use different pagination schemes — bridge translates:
 
 ### Filtering
 
-SCIM filter `filter=userName eq "x"` — Brivo list endpoints have no server-side filter support. Bridge fetches all pages from Brivo and filters in memory:
+`externalId eq` is handled via DB lookup — no Brivo list call needed:
+1. `SELECT * FROM integrations WHERE external_id=? AND resource_type=?`
+2. Get `target_id` → `GET /brivo/{resource}/{target_id}`
+3. Build single SCIM resource response (wrap in ListResponse with `totalResults=1` or `0`)
+
+All other filters — Brivo list endpoints have no server-side filter support. Bridge fetches all pages from Brivo and filters in memory:
 
 - `userName eq` → match against `emails[0].address`
 - `displayName eq` → match against Brivo group `name`
 
-For large datasets this is inefficient — acceptable for this project's scope.
+For large datasets in-memory filtering is inefficient — acceptable for this project's scope.
 
 Example: `GET /scim/v2/Users?filter=userName eq "john@example.com"&startIndex=1&count=10`
 

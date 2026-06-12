@@ -38,7 +38,6 @@ Real Brivo requires OAuth 2.0 (`api-key` header + `Authorization: bearer {token}
 ```json
 {
   "id": 12345,
-  "externalId": "okta-user-id",
   "firstName": "John",
   "lastName": "Doe",
   "emails": [{ "address": "john@example.com" }],

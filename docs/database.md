@@ -108,7 +108,7 @@ Concurrent request with same `(target, resource_type, external_id)` → UNIQUE c
 
 `provisioning_actions` rows in `running` status with no active process are orphaned. Bridge does not auto-resume — relies on the IdP retrying the operation. Retried create hits step 0, but the `pending` integration row blocks it via UNIQUE constraint.
 
-Cleanup: startup task marks `provisioning_actions WHERE status='running' AND updated_at < now() - interval '5 minutes'` as `failed`, then deletes associated `pending` integration rows.
+Cleanup: startup task marks `provisioning_actions WHERE status='running' AND updated_at < now() - interval '5 minutes'` as `failed`. Associated `pending` integration rows are **not deleted** — they prevent duplicate creation on IdP retry (retry hits UNIQUE constraint → `409`). Operator must manually clear stuck `pending` rows.
 
 ## Migrations
 

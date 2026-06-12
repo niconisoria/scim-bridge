@@ -19,7 +19,7 @@ After 3 failures: mark step `failed`, trigger rollback.
 
 If the bridge restarts while a saga is `running`, the row remains in `provisioning_actions` with status `running` but no process will resume it. On restart, the bridge does **not** auto-resume in-progress sagas — behavior relies on the IdP retrying the operation.
 
-Cleanup: startup task marks stale `running` sagas as `failed` and deletes associated `pending` integration rows. The Brivo fallback check in step 0 (see below) then catches any resources that were partially created in the target before the crash.
+Cleanup: startup task marks stale `running` sagas as `failed`. Associated `pending` integration rows are **not deleted** — they act as tombstones preventing duplicate creation on IdP retry (retry hits UNIQUE constraint on `external_id` → `409`). Operator must manually clear stuck `pending` rows after investigating.
 
 ## Operations
 
@@ -27,11 +27,9 @@ Cleanup: startup task marks stale `running` sagas as `failed` and deletes associ
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., status='pending')`. On `UniqueViolationError` → return `409`. On success: query target `GET /users?externalId={external_id}` as crash-recovery check — if found, `UPDATE` pending row to `status='active'` with `target_id`, return `409`. Record saga in `provisioning_actions`. | — |
+| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., status='pending')`. On `UniqueViolationError` → return `409`. Record saga in `provisioning_actions`. | — |
 | 1 | `POST /target/users` → save `target_id` to saga steps JSONB | `DELETE /target/users/{target_id}` |
 | 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE integration row; invalidate Redis cache |
-
-> Step 0 Brivo fallback guards against crash-recovery: if the bridge crashed after step 1 but before step 2, startup cleanup deletes the orphaned `pending` row. The IdP retry would succeed at INSERT, then the Brivo fallback query detects the existing resource and returns `409` without creating a duplicate.
 
 ### Delete User
 
@@ -63,7 +61,7 @@ Router resolves `scim_id` (URL param) → `target_group_id` via DB/cache before 
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., resource_type='group', status='pending')`. On `UniqueViolationError` → return `409`. On success: query target `GET /groups?externalId={external_id}` as crash-recovery check — if found, `UPDATE` pending row to `status='active'` with `target_id`, return `409`. Record saga in `provisioning_actions`. | — |
+| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., resource_type='group', status='pending')`. On `UniqueViolationError` → return `409`. Record saga in `provisioning_actions`. | — |
 | 1 | `POST /target/groups` → save `target_group_id` to saga steps JSONB | `DELETE /target/groups/{target_group_id}` |
 | 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE integration row; invalidate Redis cache |
 | 3 | For each member: resolve `scim_user_id` → `target_user_id` from DB/cache (if missing → `400`, abort before step 3 starts); `PUT /target/groups/{target_group_id}/users/{target_user_id}`; append `target_user_id` to `saga.steps[3].added_members` in JSONB after each success | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each ID in `added_members` in reverse |
