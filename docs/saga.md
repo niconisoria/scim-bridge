@@ -38,7 +38,7 @@ Router resolves `scim_id` (URL param) → `target_id` via DB/cache before invoki
 | Step | Forward | Rollback |
 |---|---|---|
 | 1 | Fetch user's group memberships from `group_members` table; save list to saga steps JSONB | Re-insert rows into `group_members`; re-add user to each target group |
-| 2 | `DELETE FROM group_members WHERE user_scim_id=?`; `DELETE` user from each target group | (covered by step 1 rollback) |
+| 2 | `DELETE` user from each target group (Brivo first); `DELETE FROM group_members WHERE user_scim_id=?` (DB second — after Brivo confirms) | (covered by step 1 rollback) |
 | 3 | `DELETE /target/users/{target_id}` | **Not recoverable** — log structured alert |
 | 4 | `DELETE FROM users WHERE scim_id=?`; `DELETE FROM integrations WHERE ...`. Invalidate Redis cache. | Restore users row; restore integration row; repopulate cache |
 

@@ -30,18 +30,22 @@ Single-resource GETs (`GET /Users/{id}`, `GET /Groups/{id}`) read from bridge DB
 
 | Key pattern | Invalidated by |
 |---|---|
-| `cache:{target}:scim:{type}:{scim_id}` | Delete saga step 4 (explicit DEL) |
-| `cache:{target}:ext:{type}:{external_id}` | Delete saga step 4 (explicit DEL) |
+| `cache:{target}:scim:{type}:{scim_id}` | Delete User saga step 4; Delete Group saga step 2; reconcile job on 404 |
+| `cache:{target}:ext:{type}:{external_id}` | Delete User saga step 4; Delete Group saga step 2; reconcile job on 404 |
 
 TTL is a safety net — explicit invalidation keeps cache consistent without waiting for expiry.
 
 ## Self-Healing on Target 404
 
-If a target API call returns `404` for a resource that has a DB mapping, the mapping is stale (target mutated out-of-band). Bridge must:
+Triggered on the write path (saga Brivo call returns `404`) or by the reconcile job. Reads never touch Brivo, so 404s only surface during writes or reconciliation.
 
-1. DELETE the `integrations` row from DB
-2. DEL both cache keys from Redis
-3. Return `404` to caller
+If Brivo returns `404` for a resource that has a DB mapping (stale — target mutated out-of-band):
+
+1. `DELETE FROM users/groups WHERE scim_id=?` (resource-type-appropriate)
+2. `DELETE FROM group_members WHERE group_scim_id=? OR user_scim_id=?`
+3. `DELETE FROM integrations WHERE scim_id=?`
+4. DEL both cache keys from Redis
+5. Return `404` to caller (write path) or skip resource (reconcile)
 
 ## Access Patterns
 

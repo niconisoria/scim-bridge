@@ -8,8 +8,8 @@ Docker Compose topology for local development and integration testing.
 |---|---|---|---|
 | `app` | `./Dockerfile` | `8000` | SCIM Bridge (FastAPI + Uvicorn) |
 | `mock-brivo` | `./Dockerfile.brivo` | `8001` | Mock Brivo API |
-| `postgres` | `postgres:16-alpine` | `5432` | ID mappings + provisioning audit trail |
-| `redis` | `redis:7-alpine` | `6379` | Cache layer for hot ID lookups |
+| `postgres` | `postgres:16-alpine` | `5432` | Source of truth: resource state, ID mappings, provisioning audit trail |
+| `redis` | `redis:7-alpine` | `6379` | Write-path cache for `scim_id → target_id` resolution |
 
 `app` depends on `postgres`, `redis`, and `mock-brivo` with `condition: service_healthy`. `mock-brivo` has no dependencies.
 
