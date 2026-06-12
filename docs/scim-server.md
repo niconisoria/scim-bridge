@@ -1,6 +1,6 @@
 # SCIM Server
 
-FastAPI service exposing SCIM 2.0 endpoints. Translates SCIM operations to Brivo API calls via the service layer. Multi-step operations delegated to the saga orchestrator (→ [saga.md](saga.md)). ID resolution via DB integrations table, cached in Redis (→ [database.md](database.md), [redis.md](redis.md)).
+FastAPI service exposing SCIM 2.0 endpoints. Bridge DB is source of truth for all reads. Writes propagate to Brivo via the service layer. Multi-step operations delegated to the saga orchestrator (→ [saga.md](saga.md)). ID resolution via DB `integrations` table, cached in Redis (→ [database.md](database.md), [redis.md](redis.md)).
 
 ## Endpoints
 
@@ -32,7 +32,55 @@ All routes prefixed `/scim/v2/`. Bearer token required on all except discovery.
 
 `GET /scim/v2/ServiceProviderConfig`, `/scim/v2/Schemas`, `/scim/v2/ResourceTypes`
 
-Auth middleware skips these paths by prefix match — no token required.
+Auth middleware skips these paths by prefix match — no token required. All three must return valid bodies — Okta's Runscope compliance tests hit all of them.
+
+#### ServiceProviderConfig response
+
+Okta reads this to determine which optional features the server supports. Must return a valid body — an empty body or 5xx causes Okta to disable PATCH and fall back to PUT-only mode.
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+  "patch":            { "supported": true },
+  "bulk":             { "supported": false, "maxOperations": 0, "maxPayloadSize": 0 },
+  "filter":           { "supported": true, "maxResults": 200 },
+  "changePassword":   { "supported": false },
+  "sort":             { "supported": false },
+  "etag":             { "supported": true },
+  "authenticationSchemes": [{
+    "type": "oauthbearertoken",
+    "name": "OAuth Bearer Token",
+    "description": "Bearer token via Authorization header",
+    "specUri": "https://www.rfc-editor.org/rfc/rfc6750",
+    "primary": true
+  }]
+}
+```
+
+#### ResourceTypes response
+
+```json
+{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+  "totalResults": 2,
+  "Resources": [
+    {
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+      "id": "User", "name": "User", "endpoint": "/Users",
+      "schema": "urn:ietf:params:scim:schemas:core:2.0:User"
+    },
+    {
+      "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+      "id": "Group", "name": "Group", "endpoint": "/Groups",
+      "schema": "urn:ietf:params:scim:schemas:core:2.0:Group"
+    }
+  ]
+}
+```
+
+#### Schemas response
+
+Return the full RFC 7643 schema definitions for `User` and `Group` as a `ListResponse`. Minimum: both `urn:ietf:params:scim:schemas:core:2.0:User` and `urn:ietf:params:scim:schemas:core:2.0:Group` must be present with their `attributes` arrays. Runscope validates this endpoint.
 
 ## Authentication
 
@@ -59,6 +107,12 @@ Failure → `401` with SCIM error body. Constant-time string comparison.
   "meta": { "resourceType": "User", "created": "...", "lastModified": "...", "version": "W/\"..\"", "location": "/scim/v2/Users/<scim-uuid>" }
 }
 ```
+
+**Extra fields:** Okta always sends a `password` field in `POST /Users` (even when password sync is disabled). The Pydantic User schema must use `model_config = ConfigDict(extra='ignore')` — never `extra='forbid'`. Unknown fields are silently dropped; `password` is never forwarded to Brivo.
+
+**`userName` = email tradeoff:** Okta recommends keeping `userName` distinct from email address (emails can change). We use email as `userName` because Brivo uses email as canonical identity — there is no independent username concept. This is a known tradeoff: if a user's email changes in Okta, the bridge must treat it as a `userName` update and propagate the email change to Brivo.
+
+**`userName` filter case sensitivity:** Okta's Runscope test sends `userName` in uppercase to verify case-insensitive matching. Filter query must use `LOWER(username) = LOWER(?)` or store `username` as lowercase-normalized at write time.
 
 ### Group
 ```json
@@ -138,7 +192,7 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 | `200` | GET, PUT, PATCH success (with full resource body) |
 | `201` | POST (create) success |
 | `204` | DELETE success |
-| `400` | Invalid request body, unrecognized PATCH path, `displayName` > 35 chars |
+| `400` | Invalid request body, unrecognized PATCH path, `displayName` > 35 chars — detail: `"Group displayName exceeds Brivo's 35-character limit"` |
 | `401` | Missing / invalid token |
 | `404` | Resource not found |
 | `409` | Conflict — `externalId` already provisioned (`scimType: "uniqueness"`) |
@@ -161,7 +215,7 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 `userName` has no direct Brivo field — use `emails[0].address` as canonical identity.
 
-**PATCH `replace` write path:** GET current Brivo user → merge replace ops into full user object → PUT complete body. Required because Brivo has no PATCH — all updates are full replaces.
+**PATCH `replace` write path:** `SELECT` current user from bridge DB `users` table → merge replace ops into full object → `PUT` complete body to Brivo → `UPDATE users` in bridge DB. Required because Brivo has no PATCH — all updates are full replaces.
 
 ### Group
 
@@ -170,52 +224,43 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 | `displayName` | `name` (max 35 chars — enforce at validation layer, return `400` if exceeded) |
 | `members[].value` (resolved to Brivo ID) | `PUT /groups/{groupId}/users/{userId}` per member |
 
-**PUT /Groups member reconciliation:** GET current members from Brivo → diff against new `members[]` → execute adds and removes as separate Brivo calls. Multi-step — see [saga.md § Update Group](saga.md).
+**PUT /Groups member reconciliation:** `SELECT user_scim_id FROM group_members WHERE group_scim_id=?` → diff against new `members[]` → execute adds and removes as separate Brivo calls and `group_members` table writes. Multi-step — see [saga.md § Update Group](saga.md).
 
 ### PUT Full-Replace Semantics
 
 `PUT /Users/{id}` replaces all writable fields. Fields absent from the payload are cleared in Brivo where the field is nullable (e.g., `phoneNumbers`). Non-nullable fields (`firstName`, `lastName`, `emails`) must be present — absence → `400`.
 
-## Brivo → SCIM Field Mapping (Read Path)
+## DB → SCIM Field Mapping (Read Path)
 
-Applied on every GET, list, PUT/PATCH response.
+All reads served from bridge DB — no Brivo call on the read path. Applied on every GET, list, PUT/PATCH response.
 
 ### User
 
-| Brivo | SCIM |
+| Bridge DB | SCIM |
 |---|---|
-| resolved via `integrations` table (Redis cache) | `id` (`scim_id`) |
-| resolved via `integrations` table | `externalId` |
-| `firstName` | `name.givenName` |
-| `lastName` | `name.familyName` |
-| `emails[0].address` | `emails[0].value` (`primary: true`); also `userName` |
-| `phoneNumbers[0].number` | `phoneNumbers[0].value` (`primary: true`) |
-| `suspended` | `active` (inverted: `suspended=false` → `active=true`) |
-| `created` | `meta.created` |
-| `updated` | `meta.lastModified` |
+| `integrations.scim_id` | `id` |
+| `integrations.external_id` | `externalId` |
+| `users.given_name` | `name.givenName` |
+| `users.family_name` | `name.familyName` |
+| `users.email` | `emails[0].value` (`primary: true`) |
+| `users.username` | `userName` |
+| `users.phone` | `phoneNumbers[0].value` (`primary: true`) — omit field if null |
+| `users.active` | `active` |
+| `users.created_at` | `meta.created` |
+| `users.updated_at` | `meta.lastModified` |
 
 ### Group
 
-| Brivo | SCIM |
+| Bridge DB | SCIM |
 |---|---|
-| resolved via `integrations` table (Redis cache) | `id` (`scim_id`) |
-| resolved via `integrations` table | `externalId` |
-| `name` | `displayName` |
-| members resolved via `integrations` table (Redis cache) | `members[].value` (`scim_id` per member) |
+| `integrations.scim_id` | `id` |
+| `integrations.external_id` | `externalId` |
+| `groups.display_name` | `displayName` |
+| `group_members.user_scim_id` (all rows for group) | `members[].value` |
 
 #### Member Hydration
 
-Brivo `GET /groups` and `GET /groups/{groupId}` do not return member lists. To populate `members[]`:
-
-1. Call `GET /v1/api/groups/{groupId}/users` to fetch Brivo user list for the group
-2. For each returned user, resolve `external_id` → `scim_id` via `integrations` table (Redis cache)
-3. If a user has no integration mapping (provisioned outside the bridge), omit from `members[]` — do not fail
-
-For `GET /Groups` (list): fetch members for each group in the page. This is N+1 Brivo calls per page — acceptable for this project's scope. Each call goes through the rate limiter.
-
-### Partial Brivo Responses
-
-Brivo may omit optional fields (e.g., `phoneNumbers`). Rule: **omit the field from the SCIM response** rather than returning `null` or an empty array. Never fail on a missing optional field.
+`SELECT user_scim_id FROM group_members WHERE group_scim_id=?` — single DB query, no Brivo call. For list responses, batch-fetch members for all groups in the page with a single `WHERE group_scim_id IN (...)` query.
 
 ## Meta Computation
 
@@ -223,38 +268,38 @@ Brivo may omit optional fields (e.g., `phoneNumbers`). Rule: **omit the field fr
 |---|---|
 | `meta.resourceType` | Hardcoded: `"User"` or `"Group"` |
 | `meta.location` | `{SCIM_BASE_URL}/scim/v2/Users/{scim_id}` — base URL from `SCIM_BASE_URL` env var |
-| `meta.version` | `W/"{sha1(stable_json_of_brivo_resource)}"` — deterministic hash of Brivo response |
-| `meta.created` | Brivo `created` field |
-| `meta.lastModified` | Brivo `updated` field |
+| `meta.version` | `W/"{sha1(stable_json_of_resource_row)}"` — deterministic hash of bridge DB resource row (excluding `updated_at`) |
+| `meta.created` | `users.created_at` / `groups.created_at` |
+| `meta.lastModified` | `users.updated_at` / `groups.updated_at` |
 
 ## Pagination & Filtering
 
 ### Pagination
 
-SCIM and Brivo use different pagination schemes — bridge translates:
+List endpoints query bridge DB directly. SCIM pagination maps to SQL:
 
-| SCIM param | Default | Brivo param | Formula |
+| SCIM param | Default | SQL | Formula |
 |---|---|---|---|
-| `startIndex` | `1` | `offset` | `offset = startIndex - 1` |
-| `count` | `100` | `pageSize` | `pageSize = count` |
+| `startIndex` | `1` | `OFFSET` | `offset = startIndex - 1` |
+| `count` | `100` | `LIMIT` | `limit = count` |
 
-`totalResults` comes from Brivo's `count` field. `itemsPerPage` = number of resources actually returned.
+`totalResults` = `SELECT COUNT(*) FROM users/groups JOIN integrations WHERE status='active'`. `itemsPerPage` = number of resources actually returned in this page.
+
+**Ordering:** Okta requires consistent result ordering across all paginated requests (RFC 7644 §3.4.2.4). Bridge DB list queries use `ORDER BY created_at ASC, scim_id ASC` — guaranteed stable because both columns are immutable after insert.
 
 ### Filtering
 
-`externalId eq` is handled via DB lookup — no Brivo list call needed:
-1. `SELECT * FROM integrations WHERE external_id=? AND resource_type=?`
-2. Get `target_id` → `GET /brivo/{resource}/{target_id}`
-3. Build single SCIM resource response (wrap in ListResponse with `totalResults=1` or `0`)
+All filters resolved via bridge DB — no Brivo call, no in-memory scan.
 
-All other filters — Brivo list endpoints have no server-side filter support. Bridge fetches all pages from Brivo and filters in memory:
+| Filter | Query |
+|---|---|
+| `userName eq` | `SELECT ... FROM users WHERE username=? AND status='active'` — index scan |
+| `externalId eq` | `SELECT ... FROM integrations WHERE external_id=? AND status='active'` — index scan |
+| `displayName eq` | `SELECT ... FROM groups WHERE display_name=? AND status='active'` — index scan |
 
-- `userName eq` → match against `emails[0].address`
-- `displayName eq` → match against Brivo group `name`
+Wrap single-match results in `ListResponse` with `totalResults=1` (or `0` if not found).
 
-For large datasets in-memory filtering is inefficient — acceptable for this project's scope.
-
-Example: `GET /scim/v2/Users?filter=userName eq "john@example.com"&startIndex=1&count=10`
+Example: `GET /scim/v2/Users?filter=userName eq "john@example.com"&startIndex=1&count=100`
 
 ## References
 

@@ -8,11 +8,16 @@ Ensures reliability under rate limits, incomplete downstream data, and multi-ste
 ```mermaid
 flowchart LR
     Okta -->|SCIM 2.0| Bridge["SCIM Bridge\n(FastAPI)"]
+    Bridge <-->|reads + writes| DB[(PostgreSQL)]
     Bridge --> Saga["Saga Orchestrator"]
     Saga -->|HTTP| Brivo["Mock Brivo Client"]
-    Saga <-->|saga state + ID mappings| DB[(PostgreSQL)]
+    Saga -->|resource writes + saga state| DB
     Bridge <-->|cache| Redis
+    Recon["Reconcile Job"] -->|poll| Brivo
+    Recon -->|sync out-of-band changes| DB
 ```
+
+**Bridge DB is the source of truth for all reads.** Brivo is the authoritative downstream target — it receives every write, but is never queried on the read path. The reconcile job catches out-of-band Brivo mutations and syncs them back to the bridge DB.
 
 ## Roles
 
@@ -26,19 +31,22 @@ flowchart LR
 
 | Component | Responsibility | Detail |
 |---|---|---|
-| SCIM Bridge | Translate SCIM 2.0 operations to target API calls | [scim-server.md](scim-server.md) |
+| SCIM Bridge | Translate SCIM 2.0 operations to target API calls; serves all reads from DB | [scim-server.md](scim-server.md) |
 | Mock Brivo Client | Simulate Brivo API with configurable failure modes | [brivo-mock.md](brivo-mock.md) |
 | Rate Limiter | Enforce target request rate limit | [rate-limiter.md](rate-limiter.md) |
-| Saga Orchestrator | Coordinate multi-step operations with rollback | [saga.md](saga.md) |
-| PostgreSQL | Persistent store: ID mappings + provisioning audit trail | [database.md](database.md) |
-| Redis | Cache layer for hot ID lookups | [redis.md](redis.md) |
+| Saga Orchestrator | Coordinate multi-step operations with rollback; writes resource state to DB | [saga.md](saga.md) |
+| PostgreSQL | Source of truth: resource state (users, groups, members) + ID mappings + audit trail | [database.md](database.md) |
+| Redis | Cache layer for hot resource and ID lookups | [redis.md](redis.md) |
+| Reconcile Job | Polls Brivo periodically; syncs out-of-band mutations back to bridge DB | [database.md § Reconciliation](database.md) |
 
 ## Constraints
 
+- Bridge DB is source of truth for reads — never query Brivo on the read path
 - Target system enforces a rate limit — enforce at client layer, never drop under normal load
-- Target responses may be partial/incomplete — handle gracefully
+- Target responses may be partial/incomplete — handle gracefully on write path only
 - All operations must be **idempotent** and retry-safe
 - Multi-step operations must define forward + compensating (rollback) actions
+- Out-of-band Brivo mutations are tolerated until the next reconcile cycle — bridge DB may be briefly stale
 
 ## Deliverables
 
