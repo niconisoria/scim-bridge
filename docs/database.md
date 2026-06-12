@@ -118,7 +118,9 @@ Audit log of all saga executions.
 | `updated_at` | TIMESTAMPTZ | NOT NULL, default `now()` |
 | `completed_at` | TIMESTAMPTZ | nullable |
 
-**`operation` values:** `create_user`, `update_user`, `delete_user`, `create_group`, `update_group`, `delete_group`, `add_member`, `remove_member`, `replace_members`
+**`operation` values:** `create_user`, `delete_user`, `create_group`, `update_group`, `delete_group`, `add_member`, `remove_member`
+
+Non-saga operations (Update User, PATCH replace group attrs, PATCH replace members) are not recorded here — they are single read-modify-write calls with `tenacity` retries, not sagas. `update_group` covers PATCH replace members when it runs as a full diff saga.
 
 **`status` values:** `running`, `completed`, `compensating`, `compensated`, `failed`
 

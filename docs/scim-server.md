@@ -261,7 +261,7 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 `userName` has no direct Brivo field — use `emails[0].address` as canonical identity.
 
-**PATCH `replace` write path:** `SELECT` current user from bridge DB `users` table → merge replace ops into full object → `PUT` complete body to Brivo → `UPDATE users` in bridge DB. Required because Brivo has no PATCH — all updates are full replaces.
+**PATCH `replace` write path:** `SELECT` current user from bridge DB `users` table → merge replace ops into full object → `PUT` complete body to Brivo → `UPDATE users` in bridge DB. Bridge uses PUT by design (full-replace semantics); Brivo does expose PATCH but the bridge doesn't use it.
 
 ### Group
 
@@ -274,7 +274,7 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 
 ### PUT Full-Replace Semantics
 
-`PUT /Users/{id}` replaces all writable fields. Fields absent from the payload are cleared in Brivo where the field is nullable (e.g., `phoneNumbers`). Non-nullable fields (`firstName`, `lastName`, `emails`) must be present — absence → `400`.
+`PUT /Users/{id}` replaces all writable fields. Fields absent from the payload are cleared in Brivo (nullable fields set to empty/null) and in the bridge DB `users` table (`phone` set to NULL). Non-nullable fields (`firstName`, `lastName`, `emails`) must be present — absence → `400`.
 
 ## DB → SCIM Field Mapping (Read Path)
 
@@ -313,7 +313,7 @@ All reads served from bridge DB — no Brivo call on the read path. Applied on e
 | Field | Source |
 |---|---|
 | `meta.resourceType` | Hardcoded: `"User"` or `"Group"` |
-| `meta.location` | `{SCIM_BASE_URL}/scim/v2/Users/{scim_id}` — base URL from `SCIM_BASE_URL` env var |
+| `meta.location` | `{SCIM_BASE_URL}/scim/v2/Users/{scim_id}` for users; `{SCIM_BASE_URL}/scim/v2/Groups/{scim_id}` for groups — base URL from `SCIM_BASE_URL` env var |
 | `meta.version` | `W/"{sha1(stable_json_of_resource_row)}"` — deterministic hash of bridge DB resource row (excluding `updated_at`) |
 | `meta.created` | `users.created_at` / `groups.created_at` |
 | `meta.lastModified` | `users.updated_at` / `groups.updated_at` |

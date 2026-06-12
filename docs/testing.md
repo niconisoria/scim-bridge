@@ -19,6 +19,9 @@ Each component tested in isolation. DB replaced by ephemeral PostgreSQL fixture.
 | SCIM schemas | Validation, serialization, PATCH op parsing |
 | Auth middleware | Valid token passes; missing/invalid returns `401` |
 | Integrations repository | Insert pending, activate, lookup by scim_id/external_id/target_id, delete; missing ID returns `None` |
+| Users repository | Insert user, update attributes, delete; lookup by scim_id; missing returns `None` |
+| Groups repository | Insert group, update display_name, delete; lookup by scim_id |
+| GroupMembers repository | Insert membership, delete membership, list members by group_scim_id |
 | Saga repository | Create saga, update step, set terminal status |
 | Cache layer | Cache-aside read hit/miss; invalidation on delete |
 | Rate limiter | Token acquisition (aiolimiter leaky bucket, in-process); backoff on `429` |
@@ -38,7 +41,7 @@ Full stack: real PostgreSQL (Docker), real Redis (Docker), SCIM bridge, `respx`-
 | PATCH add/remove member | Correct Brivo member call, `group_members` table updated, ID resolved from DB/cache |
 | Rate limit queuing | 25 concurrent requests complete, none dropped |
 | Auth rejection | `401` on missing and wrong token |
-| Write-path partial Brivo response | Brivo create returns user without `phoneNumbers` → bridge stores what Brivo returns, no error |
+| Write-path partial Brivo response | Brivo create returns user without `phoneNumbers` → bridge stores what the SCIM request contained (not Brivo's response), no error |
 | Create idempotency | Duplicate `POST /Users` same `externalId` → `409` (UNIQUE constraint on `integrations`), no second Brivo call |
 | Concurrent create race | Two simultaneous `POST /Users` same `externalId` → exactly one `201`, one `409` |
 | Self-healing stale mapping (write) | Saga Brivo call returns `404` → `users`/`integrations` rows deleted, cache invalidated, `404` returned to caller |
