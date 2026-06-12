@@ -11,7 +11,7 @@ flowchart LR
     Bridge --> Saga["Saga Orchestrator"]
     Saga -->|HTTP| Brivo["Mock Brivo Client"]
     Saga <-->|saga state + ID mappings| DB[(PostgreSQL)]
-    Bridge <-->|cache + rate limit| Redis
+    Bridge <-->|cache| Redis
 ```
 
 ## Roles
@@ -31,7 +31,7 @@ flowchart LR
 | Rate Limiter | Enforce target request rate limit | [rate-limiter.md](rate-limiter.md) |
 | Saga Orchestrator | Coordinate multi-step operations with rollback | [saga.md](saga.md) |
 | PostgreSQL | Persistent store: ID mappings + provisioning audit trail | [database.md](database.md) |
-| Redis | Cache layer + rate-limiter coordination | [redis.md](redis.md) |
+| Redis | Cache layer for hot ID lookups | [redis.md](redis.md) |
 
 ## Constraints
 

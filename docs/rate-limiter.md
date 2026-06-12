@@ -4,11 +4,11 @@ Enforces Brivo's 20 req/sec limit at the Brivo client layer. Requests queue rath
 
 ## Algorithm
 
-Token bucket:
-- Capacity: 20 tokens
-- Refill rate: 20 tokens/sec
-- On every Brivo HTTP call: acquire 1 token before sending
-- If no token available: caller `await`s until next refill
+Leaky bucket (`aiolimiter` implementation):
+- At most 20 requests allowed within any 1-second window
+- Requests are distributed evenly — no burst accumulation
+- On every Brivo HTTP call: `async with limiter:` before sending
+- If rate exceeded: caller `await`s until the next slot opens
 
 ## Implementation
 
