@@ -46,7 +46,7 @@
 ## Phase 6 — Brivo Client
 
 - [ ] #27 Implement `app/brivo/client.py` — httpx wrapper for all Brivo endpoints
-- [ ] #28 Implement `app/brivo/rate_limiter.py` — aiolimiter + Redis coordination + tenacity 429
+- [ ] #28 Implement `app/brivo/rate_limiter.py` — aiolimiter + tenacity 429 handling
 
 ## Phase 7 — Field Mapper
 

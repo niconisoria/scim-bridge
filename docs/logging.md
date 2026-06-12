@@ -34,7 +34,7 @@
 `saga_id`, `step_index`, `action` (`forward` / `rollback`), `status`, `error`
 
 ### Rate Limiter
-`tokens_available`, `wait_ms`
+`wait_ms`
 
 ## Log Levels
 

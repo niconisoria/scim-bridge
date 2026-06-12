@@ -23,7 +23,7 @@
 | Migrations | Alembic |
 | Cache | Redis (redis-py asyncio) |
 | HTTP client | httpx (AsyncClient) |
-| Rate limiting | aiolimiter (token bucket) |
+| Rate limiting | aiolimiter (leaky bucket) |
 | Retries | tenacity |
 | Logging | structlog |
 | Testing | pytest + pytest-asyncio + httpx |
@@ -51,7 +51,7 @@ scim-bridge/
 │   ├── services/           ← SCIM logic, saga orchestrator
 │   ├── brivo/              ← Brivo client + rate limiter
 │   ├── db/                 ← SQLAlchemy models, session, repositories
-│   ├── redis/              ← cache layer, rate-limiter coordination
+│   ├── redis/              ← cache layer
 │   └── core/               ← config, auth middleware, error handlers, logging
 ├── tests/
 │   ├── unit/
@@ -77,7 +77,7 @@ scim-bridge/
 - [docs/database.md](docs/database.md) — schema, migrations, access patterns
 - [docs/scim-server.md](docs/scim-server.md) — SCIM 2.0 endpoints, schemas, auth, field mapping
 - [docs/brivo-mock.md](docs/brivo-mock.md) — mock Brivo API, failure simulation
-- [docs/rate-limiter.md](docs/rate-limiter.md) — token bucket, Redis coordination, 429 handling
+- [docs/rate-limiter.md](docs/rate-limiter.md) — leaky bucket, 429 handling
 - [docs/saga.md](docs/saga.md) — saga state machine, all multi-step operations
 - [docs/redis.md](docs/redis.md) — cache key inventory, TTL strategy, access patterns
 - [docs/logging.md](docs/logging.md) — structlog fields, levels

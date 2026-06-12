@@ -35,6 +35,8 @@ Cleanup: startup task marks stale `running` sagas as `failed` and deletes associ
 
 ### Delete User
 
+Router resolves `scim_id` (URL param) → `target_id` via DB/cache before invoking saga; if missing → `404`.
+
 | Step | Forward | Rollback |
 |---|---|---|
 | 1 | Fetch user's target group memberships; save list to saga steps JSONB | Re-add user to each group |
@@ -45,6 +47,8 @@ Cleanup: startup task marks stale `running` sagas as `failed` and deletes associ
 > Step 3 rollback is unrecoverable. Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
 
 ### Delete Group
+
+Router resolves `scim_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
@@ -62,7 +66,7 @@ Cleanup: startup task marks stale `running` sagas as `failed` and deletes associ
 | 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., resource_type='group', status='pending')`. On `UniqueViolationError` → return `409`. On success: query target `GET /groups?externalId={external_id}` as crash-recovery check — if found, `UPDATE` pending row to `status='active'` with `target_id`, return `409`. Record saga in `provisioning_actions`. | — |
 | 1 | `POST /target/groups` → save `target_group_id` to saga steps JSONB | `DELETE /target/groups/{target_group_id}` |
 | 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE integration row; invalidate Redis cache |
-| 3 | For each member: resolve `scim_user_id` → `target_user_id` from DB/cache (if missing → `400`, abort before step 3 starts); `PUT /target/groups/{groupId}/users/{userId}`; append `userId` to `saga.steps[3].added_members` in JSONB after each success | `DELETE /target/groups/{groupId}/users/{userId}` for each ID in `added_members` in reverse |
+| 3 | For each member: resolve `scim_user_id` → `target_user_id` from DB/cache (if missing → `400`, abort before step 3 starts); `PUT /target/groups/{target_group_id}/users/{target_user_id}`; append `target_user_id` to `saga.steps[3].added_members` in JSONB after each success | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each ID in `added_members` in reverse |
 
 > Step 3 member resolution: if any `scim_user_id` has no integration mapping, the entire saga aborts before executing any target member calls — return `400` to caller.
 
@@ -70,12 +74,16 @@ Cleanup: startup task marks stale `running` sagas as `failed` and deletes associ
 
 ### Add Member to Group (PATCH `add`)
 
+Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+
 | Step | Forward | Rollback |
 |---|---|---|
 | 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
 | 2 | `PUT /target/groups/{target_group_id}/users/{target_user_id}` | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` |
 
 ### Remove Member from Group (PATCH `remove`)
+
+Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
