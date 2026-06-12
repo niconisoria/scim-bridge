@@ -1,10 +1,15 @@
 # Mock Brivo Client
 
-Standalone FastAPI service at `http://mock-brivo:8001`. Mirrors the real Brivo Access API surface used by the SCIM bridge, with configurable failure modes. All calls from the bridge go through the rate-limited client interface (→ [rate-limiter.md](rate-limiter.md)).
+Standalone FastAPI service at `http://mock-brivo:8001`. Simulates the real Brivo Access API (`https://api.brivo.com/v1/api`) — it is independent of the SCIM bridge and has no knowledge of SCIM, Okta, or provisioning concepts. Implements only the endpoints the bridge calls; other real Brivo endpoints (credentials, photos, custom fields, access points) are out of scope.
 
 ## Authentication (real API)
 
-Real Brivo requires OAuth 2.0 (`api-key` header + `Authorization: bearer {token}`). The mock accepts any `api-key` header value — no token flow needed.
+Real Brivo requires two headers on all calls:
+- `api-key: {your-api-key}` — from the Brivo developer portal
+- `Authorization: bearer {access_token}` — OAuth 2.0 authorization code flow
+- `Content-type: application/json` — required on all write requests
+
+Mock accepts any `api-key` header value — no token flow simulated.
 
 ## Endpoints
 
@@ -38,26 +43,31 @@ Real Brivo requires OAuth 2.0 (`api-key` header + `Authorization: bearer {token}
 ```json
 {
   "id": 12345,
+  "externalId": "any-external-ref",
   "firstName": "John",
   "lastName": "Doe",
-  "emails": [{ "address": "john@example.com" }],
-  "phoneNumbers": [{ "number": "+15550001234" }],
+  "emails": [{ "address": "john@example.com", "type": "work" }],
+  "phoneNumbers": [{ "number": "+15550001234", "type": "mobile" }],
   "suspended": false,
   "created": "2024-01-01T00:00:00Z",
   "updated": "2024-01-01T00:00:00Z"
 }
 ```
 
+`externalId` is Brivo's own field for referencing the user in an external system — it is set by the API caller, not by Brivo. `POST /users` returns `200` (not `201`) on success.
+
 ### Group (Brivo)
 ```json
 {
   "id": 99,
-  "externalId": "okta-group-id",
-  "name": "Engineering"
+  "name": "Engineering",
+  "keypadUnlock": false,
+  "immuneToAntipassback": false,
+  "antipassbackResetTime": 0
 }
 ```
 
-`name` max 35 characters.
+`name` max 35 characters. Groups have no `externalId` field in the Brivo API.
 
 ### Paginated List Response
 ```json
@@ -75,13 +85,26 @@ Query params: `offset` (default `0`), `pageSize` (default `20`, max `100`).
 
 | Code | When |
 |---|---|
-| `200` | Success with body |
-| `204` | Successful delete or assignment (no body) |
+| `200` | Success with body (including creates — Brivo returns 200, not 201) |
+| `204` | Success with no body (delete, group member assignment/removal) |
 | `400` | Invalid input (e.g., group name > 35 chars) |
 | `403` | Forbidden |
 | `404` | Resource not found |
-| `429` | Rate limit exceeded |
+| `429` | Rate limit exceeded (simulated — not documented in real Brivo API) |
 | `503` | Service unavailable (simulated) |
+
+**Error response body:**
+```json
+{ "code": 404, "message": "Resource not found" }
+```
+
+### `GET /users/{userId}/groups` response
+
+Used by the bridge's Delete User saga to fetch group memberships before removal.
+
+```json
+{ "count": 2, "data": [{ "id": 99, "name": "Engineering" }] }
+```
 
 ## Behavior Simulation
 
@@ -90,7 +113,7 @@ Query params: `offset` (default `0`), `pageSize` (default `20`, max `100`).
 | Latency | Random 50–300ms per request | `BRIVO_LATENCY_MS` |
 | Error rate | 10% → `500` or `503` | `BRIVO_ERROR_RATE` |
 | Partial responses | `GET` may omit `phoneNumbers` | — |
-| Rate limit signal | Returns `429` when > 20 req/sec | `BRIVO_RATE_LIMIT` |
+| Rate limit signal | Returns `429` when > 20 req/sec (simulated threshold) | `BRIVO_RATE_LIMIT` |
 
 Partial responses are deterministic per `userId` for reproducible test scenarios.
 
