@@ -10,10 +10,10 @@
 
 ## Phase 1 — Core
 
-- [ ] #6 Implement `app/core/config.py` — pydantic-settings
-- [ ] #7 Implement `app/core/logging.py` — structlog JSON + correlation_id
-- [ ] #8 Implement `app/core/auth.py` — bearer token middleware
-- [ ] #9 Implement `app/core/errors.py` — SCIM error builder (`status` field as string per RFC 7644 §3.12)
+- [x] #6 Implement `app/core/config.py` — pydantic-settings
+- [x] #7 Implement `app/core/logging.py` — structlog JSON + correlation_id
+- [x] #8 Implement `app/core/auth.py` — bearer token middleware
+- [x] #9 Implement `app/core/errors.py` — SCIM error builder (`status` field as string per RFC 7644 §3.12)
 
 ## Phase 2 — Redis Layer
 
