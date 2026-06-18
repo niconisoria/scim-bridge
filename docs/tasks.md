@@ -17,7 +17,7 @@
 
 ## Phase 2 — Redis Layer
 
-- [ ] #10 Implement `app/redis/store.py` — async Redis connection + FastAPI dependency; ID mapping CRUD (`scim↔target↔external↔tid`, no TTL); Brivo response cache (TTL 5 min); `SET NX EX 300` idempotency locks
+- [x] #10 Implement `app/redis/store.py` — async Redis connection + FastAPI dependency; ID mapping CRUD (`scim↔target↔external↔tid`, no TTL); Brivo response cache (TTL 5 min); `SET NX EX 300` idempotency locks
 
 ## Phase 3 — Pydantic Models
 
