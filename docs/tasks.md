@@ -21,44 +21,46 @@
 
 ## Phase 3 — Pydantic Models
 
-- [ ] #14 Implement `app/models/user.py` — SCIM User schemas
-- [ ] #15 Implement `app/models/group.py` — SCIM Group schemas (displayName ≤ 35 chars)
-- [ ] #16 Implement `app/models/common.py` — ListResponse, PatchOp, Error, Meta
-- [ ] #17 Implement `app/models/brivo.py` — Brivo User, Group, paginated list
+- [ ] #11 Implement `app/models/user.py` — SCIM User schemas
+- [ ] #12 Implement `app/models/group.py` — SCIM Group schemas (displayName ≤ 35 chars)
+- [ ] #13 Implement `app/models/common.py` — ListResponse, PatchOp, Error, Meta
+- [ ] #14 Implement `app/models/brivo.py` — Brivo User, Group, paginated list (used by bridge only — mock Brivo defines its own inline schemas)
 
 ## Phase 4 — Mock Brivo Service
 
-- [ ] #18 Mock Brivo skeleton — FastAPI app, `/health`, in-memory store
-- [ ] #19 Mock Brivo user endpoints — list, create, get, update, delete, list groups
-- [ ] #20 Mock Brivo group endpoints + member management
-- [ ] #21 Mock Brivo behavior simulation — latency, error rate, partial responses, 429
+Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydantic schemas — it does **not** import from `app/`. Independently testable with curl after this phase.
+
+- [ ] #15 Mock Brivo skeleton — FastAPI app, `/health`, in-memory store, inline schemas
+- [ ] #16 Mock Brivo user endpoints — list, create, get, update, delete, list user's groups
+- [ ] #17 Mock Brivo group endpoints + member management
+- [ ] #18 Mock Brivo behavior simulation — latency, error rate, partial responses, 429
 
 ## Phase 5 — Brivo Client
 
-- [ ] #22 Implement `app/brivo/client.py` — httpx wrapper for all Brivo endpoints
-- [ ] #23 Implement `app/brivo/rate_limiter.py` — aiolimiter + tenacity 429 handling
+- [ ] #19 Implement `app/brivo/client.py` — httpx wrapper for all Brivo endpoints
+- [ ] #20 Implement `app/brivo/rate_limiter.py` — aiolimiter + tenacity 429 handling
 
 ## Phase 6 — Field Mapper
 
-- [ ] #24 Implement `app/services/field_mapper.py` — write path (SCIM→Brivo)
-- [ ] #25 Implement `app/services/field_mapper.py` — read path (Brivo→SCIM) + meta computation (timestamps from idmap `created_at`; version hash from Brivo resource JSON)
-- [ ] #26 Implement member hydration — resolve Brivo `target_id` → `scim_id` via `idmap:tid` keys
+- [ ] #21 Implement `app/services/field_mapper.py` — write path (SCIM→Brivo)
+- [ ] #22 Extend `app/services/field_mapper.py` — read path (Brivo→SCIM) + meta computation (timestamps from idmap `created_at` and Brivo `updated`; version hash from Brivo resource JSON)
+- [ ] #23 Extend `app/services/field_mapper.py` — member hydration: resolve Brivo `target_id` → `scim_id` via `idmap:tid` keys
 
 ## Phase 7 — Saga Orchestrator
 
-- [ ] #27 Implement `app/services/saga.py` — base saga runner (state machine, tenacity, rollback)
-- [ ] #28 Implement Create User saga — step 0: SETNX lock (409 on conflict); step 1: POST to Brivo; step 2: write idmap keys (no TTL), DEL lock
-- [ ] #29 Implement Delete User saga — fetch group memberships from Brivo, remove from each group, DELETE from Brivo, DEL idmap + cache keys
-- [ ] #30 Implement Create Group saga — step 0: SETNX lock; step 1: POST to Brivo; step 2: write idmap; step 3: bulk add members (resolve scim→target via idmap upfront)
-- [ ] #31 Implement Delete Group saga
-- [ ] #32 Implement Add Member(s) saga (PATCH `add`) — resolve all scim→target IDs from idmap upfront (400 if any missing), PUT each to Brivo, invalidate member cache
-- [ ] #33 Implement Remove Member saga (PATCH `remove`)
-- [ ] #34 Implement Update Group saga (PUT) — fetch current members from Brivo (cache), resolve new members from idmap, add new (PUT to Brivo), remove stale (DELETE from Brivo), invalidate cache
-- [ ] #35 Implement Update User read-modify-write (no saga) — fetch from Brivo (cache), merge PUT/PATCH replace fields, PUT to Brivo (tenacity), invalidate cache, return Brivo→SCIM mapped response
+- [ ] #24 Implement `app/services/saga.py` — base saga runner (state machine, tenacity, rollback); all following saga tasks depend on this
+- [ ] #25 Implement Create User saga — step 0: SETNX lock (409 on conflict); step 1: POST to Brivo; step 2: write idmap keys (no TTL), DEL lock
+- [ ] #26 Implement Delete User saga — `GET /users/{id}/groups`, remove from each group, DELETE from Brivo, DEL idmap + cache keys
+- [ ] #27 Implement Create Group saga — step 0: SETNX lock; step 1: POST to Brivo; step 2: write idmap; step 3: bulk add members (resolve scim→target via idmap upfront)
+- [ ] #28 Implement Delete Group saga
+- [ ] #29 Implement Add Member(s) saga (PATCH `add`) — resolve all scim→target IDs from idmap upfront (400 if any missing), PUT each to Brivo, invalidate member cache
+- [ ] #30 Implement Remove Member saga (PATCH `remove`)
+- [ ] #31 Implement Update Group saga (PUT) — fetch current members from Brivo (cache), resolve new members from idmap, add new (PUT to Brivo), remove stale (DELETE from Brivo), invalidate cache
+- [ ] #32 Implement Update User read-modify-write (no saga) — fetch from Brivo (cache), merge PUT/PATCH replace fields, PUT to Brivo (tenacity), invalidate cache, return Brivo→SCIM mapped response
 
 ## Phase 8 — SCIM Routers
 
-- [ ] #36 Implement `app/routers/users.py` — all 6 user endpoints
-- [ ] #37 Implement `app/routers/groups.py` — all 6 group endpoints; PATCH `replace` group attributes handled inline (no saga): PUT to Brivo + invalidate cache, tenacity retries
-- [ ] #38 Implement `app/routers/discovery.py` — unauthenticated discovery endpoints
-- [ ] #39 Implement `main.py` — app assembly, middleware, lifespan
+- [ ] #33 Implement `app/routers/users.py` — all 6 user endpoints
+- [ ] #34 Implement `app/routers/groups.py` — all 6 group endpoints; PATCH `replace` group attributes handled inline (no saga): PUT to Brivo + invalidate cache, tenacity retries
+- [ ] #35 Implement `app/routers/discovery.py` — unauthenticated discovery endpoints
+- [ ] #36 Implement `main.py` — app assembly, middleware, lifespan
