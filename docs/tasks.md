@@ -2,11 +2,11 @@
 
 ## Phase 0 — Scaffolding
 
-- [ ] #1 Create project directory structure — `app/`, `tests/`, `docs/specs/`, all `__init__.py`
-- [ ] #2 Create `pyproject.toml` with all dependencies
-- [ ] #3 Create `.env.example`
-- [ ] #4 Create `Dockerfile` and `Dockerfile.brivo`
-- [ ] #5 Create `docker-compose.yml`
+- [x] #1 Create project directory structure — `app/`, `tests/`, `docs/specs/`, all `__init__.py`
+- [x] #2 Create `pyproject.toml` with all dependencies
+- [x] #3 Create `.env.example`
+- [x] #4 Create `Dockerfile` and `Dockerfile.brivo`
+- [x] #5 Create `docker-compose.yml`
 
 ## Phase 1 — Core
 

@@ -1,0 +1,43 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mock-brivo:
+    build:
+      context: .
+      dockerfile: Dockerfile.brivo
+    ports:
+      - "8001:8001"
+    environment:
+      BRIVO_ERROR_RATE: ${BRIVO_ERROR_RATE:-0.1}
+      BRIVO_LATENCY_MS: ${BRIVO_LATENCY_MS:-300}
+      BRIVO_RATE_LIMIT: ${BRIVO_RATE_LIMIT:-20}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      BRIVO_BASE_URL: http://mock-brivo:8001
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-brivo:
+        condition: service_healthy
