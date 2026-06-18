@@ -199,11 +199,7 @@ for each op in Operations[]:
 
 #### Multi-Operation Requests
 
-`Operations[]` may contain multiple ops — process sequentially:
-
-- Consecutive scalar `replace` ops → batch into single read-modify-write call
-- `add`/`remove`/`replace` member ops → execute as member operations
-- Mixed attribute + member ops → apply attribute updates first, then member ops
+`Operations[]` may contain multiple ops — process sequentially. Apply attribute updates first, then member ops.
 
 #### Multi-Value Member Add
 
@@ -284,8 +280,8 @@ All reads served from Brivo (via Redis cache) — no direct DB on the read path.
 
 | Brivo / Redis | SCIM |
 |---|---|
-| `idmap:brivo:scim:user:{scim_id}` → key lookup | `id` (= `scim_id`) |
-| `idmap:brivo:ext:user:{external_id}` → key lookup | `externalId` |
+| URL param `{scim_id}` | `id` |
+| `idmap:brivo:scim:user:{scim_id}` → `external_id` | `externalId` |
 | `firstName` | `name.givenName` |
 | `lastName` | `name.familyName` |
 | `emails[0].address` | `emails[0].value` (`primary: true`) |
@@ -293,7 +289,7 @@ All reads served from Brivo (via Redis cache) — no direct DB on the read path.
 | `phoneNumbers[0].number` | `phoneNumbers[0].value` (`primary: true`) — omit field if absent |
 | `suspended` (inverted) | `active` |
 | `idmap:brivo:scim:user:{scim_id}` → `created_at` | `meta.created` |
-| hash of Brivo resource JSON | `meta.lastModified` (approximated; see Meta Computation) |
+| Brivo `updated` field | `meta.lastModified` |
 
 ### Group
 
@@ -306,7 +302,7 @@ All reads served from Brivo (via Redis cache) — no direct DB on the read path.
 
 #### Member Hydration
 
-Fetch `cache:brivo:group:{target_id}:members` (miss → Brivo GET). Resolve each Brivo user ID to `scim_id` via `idmap:brivo:scim:user:{scim_id}` reverse lookup (iterate idmap or maintain a reverse key). For list responses, batch-fetch member lists for all groups in the page.
+Fetch `cache:brivo:group:{target_id}:members` (miss → Brivo GET). Resolve each Brivo user `target_id` to `scim_id` via `idmap:brivo:tid:user:{target_id}` (O(1) lookup — see [redis.md](redis.md)). For list responses, batch-fetch member lists for all groups in the page.
 
 ## Meta Computation
 
@@ -316,7 +312,7 @@ Fetch `cache:brivo:group:{target_id}:members` (miss → Brivo GET). Resolve each
 | `meta.location` | `{SCIM_BASE_URL}/scim/v2/Users/{scim_id}` for users; `{SCIM_BASE_URL}/scim/v2/Groups/{scim_id}` for groups |
 | `meta.version` | `W/"{sha1(stable_json_of_brivo_resource)}"` — deterministic hash of the Brivo resource object |
 | `meta.created` | `created_at` stored in `idmap:brivo:scim:{type}:{scim_id}` at saga completion |
-| `meta.lastModified` | `updated_at` stored alongside the cache key on each write; on cache miss, use `meta.created` |
+| `meta.lastModified` | Brivo `updated` field on the resource |
 
 ## Pagination & Filtering
 
@@ -329,9 +325,9 @@ Brivo is source of truth — list endpoints proxy pagination to Brivo.
 | `startIndex` | `1` | `offset = startIndex - 1` |
 | `count` | `100` | `pageSize = count` |
 
-`totalResults` = total count returned by Brivo (`pageCount * pageSize` or a dedicated count field). `itemsPerPage` = number of resources actually returned.
+`totalResults` = `count` field from Brivo paginated response. `itemsPerPage` = number of resources actually returned.
 
-**Ordering:** Use Brivo's native ordering. If Brivo does not guarantee stable ordering across pages, bridge sorts by `scim_id` (from idmap) ascending — consistent because `scim_id` is generated once and never changes.
+**Ordering:** Use Brivo's native ordering. Known limitation: if Brivo's ordering is unstable across pages, duplicate or skipped resources are possible — acceptable for a learning project.
 
 ### Filtering
 

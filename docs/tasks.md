@@ -17,10 +17,7 @@
 
 ## Phase 2 — Redis Layer
 
-- [ ] #10 Implement `app/redis/client.py` — async Redis connection + FastAPI dependency
-- [ ] #11 Implement `app/redis/idmap.py` — ID mapping CRUD: write `scim↔target↔external` (no TTL); lookup by `scim_id` or `external_id`; delete on resource removal
-- [ ] #12 Implement `app/redis/cache.py` — Brivo response cache: read/write/invalidate for user, group, and group-member responses (TTL 5 min)
-- [ ] #13 Implement `app/redis/locks.py` — `SET NX EX 300` idempotency lock for create sagas; delete on completion or rollback
+- [ ] #10 Implement `app/redis/store.py` — async Redis connection + FastAPI dependency; ID mapping CRUD (`scim↔target↔external↔tid`, no TTL); Brivo response cache (TTL 5 min); `SET NX EX 300` idempotency locks
 
 ## Phase 3 — Pydantic Models
 
@@ -45,7 +42,7 @@
 
 - [ ] #24 Implement `app/services/field_mapper.py` — write path (SCIM→Brivo)
 - [ ] #25 Implement `app/services/field_mapper.py` — read path (Brivo→SCIM) + meta computation (timestamps from idmap `created_at`; version hash from Brivo resource JSON)
-- [ ] #26 Implement member hydration — resolve Brivo user IDs → scim_ids via idmap
+- [ ] #26 Implement member hydration — resolve Brivo `target_id` → `scim_id` via `idmap:tid` keys
 
 ## Phase 7 — Saga Orchestrator
 

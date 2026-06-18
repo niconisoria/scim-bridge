@@ -35,7 +35,7 @@ Router resolves `scim_id` → `target_id` via Redis idmap; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | `GET /target/groups` filtered by user membership (or Brivo member list endpoint); save group `target_id` list to saga state | — |
+| 1 | `GET /v1/api/users/{target_id}/groups` → save group `target_id` list to saga state | — |
 | 2 | For each group: `DELETE /target/groups/{target_group_id}/users/{target_id}`; DEL `cache:brivo:group:{target_group_id}:members` | Re-add user to each group; repopulate member cache |
 | 3 | `DELETE /target/users/{target_id}` | **Not recoverable** — log structured alert |
 | 4 | DEL `idmap:brivo:scim:user:{scim_id}`; DEL `idmap:brivo:ext:user:{external_id}`; DEL `cache:brivo:user:{target_id}` | Restore idmap keys |

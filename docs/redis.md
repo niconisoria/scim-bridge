@@ -13,10 +13,11 @@ Redis serves two purposes:
 |---|---|---|
 | `idmap:{target}:scim:{type}:{scim_id}` | string | JSON `{ target_id, external_id, created_at }` |
 | `idmap:{target}:ext:{type}:{external_id}` | string | JSON `{ scim_id, target_id }` |
+| `idmap:{target}:tid:{type}:{target_id}` | string | JSON `{ scim_id, external_id }` |
 
 `type` is `user` or `group`. `target` is the downstream system identifier (e.g. `brivo`).
 
-Written atomically on saga completion. No TTL — deleted only when the resource is deleted.
+All three written atomically on saga completion. No TTL — deleted only when the resource is deleted. `tid` key enables O(1) `target_id → scim_id` lookup required for member hydration.
 
 `created_at` stored in the `scim` key is used to populate `meta.created` in SCIM responses (Brivo does not expose creation timestamps).
 
@@ -55,10 +56,10 @@ Cache-aside: read cache first, on miss call Brivo and populate. Explicitly inval
 | Operation | Keys touched |
 |---|---|
 | Create resource (step 0) | `SET NX EX 300 lock:{target}:create:{type}:{external_id}` |
-| Create resource (complete) | DEL lock key; SET `idmap:scim` and `idmap:ext` (no TTL) |
+| Create resource (complete) | DEL lock key; SET `idmap:scim`, `idmap:ext`, and `idmap:tid` keys (no TTL) |
 | Update resource | DEL `cache:{target}:user/group:{target_id}` |
 | Add/remove group member | DEL `cache:{target}:group:{target_id}:members` |
-| Delete resource | DEL idmap keys + all cache keys for the resource |
+| Delete resource | DEL all three idmap keys + all cache keys for the resource |
 
 ## Invalidation Rules
 
@@ -66,6 +67,7 @@ Cache-aside: read cache first, on miss call Brivo and populate. Explicitly inval
 |---|---|
 | `idmap:{target}:scim:{type}:{scim_id}` | Delete User saga; Delete Group saga |
 | `idmap:{target}:ext:{type}:{external_id}` | Delete User saga; Delete Group saga |
+| `idmap:{target}:tid:{type}:{target_id}` | Delete User saga; Delete Group saga |
 | `cache:{target}:user:{target_id}` | Update User (write-modify-write); Delete User saga |
 | `cache:{target}:group:{target_id}` | PATCH/PUT group attrs; Delete Group saga |
 | `cache:{target}:group:{target_id}:members` | Add Member saga; Remove Member saga; Update Group saga; Delete Group saga |

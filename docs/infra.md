@@ -7,7 +7,7 @@ Docker Compose topology for local development and integration testing.
 | Service | Image | Port | Notes |
 |---|---|---|---|
 | `app` | `./Dockerfile` | `8000` | SCIM Bridge (FastAPI + Uvicorn) |
-| `mock-brivo` | `./Dockerfile.brivo` | `8001` | Mock Brivo API (source of truth) |
+| `mock-brivo` | `./Dockerfile.brivo` | `8001` | Simulates Brivo API; in-memory state is authoritative for tests |
 | `redis` | `redis:7-alpine` | `6379` | ID mapping store + Brivo response cache |
 
 `app` depends on `redis` and `mock-brivo` with `condition: service_healthy`. `mock-brivo` has no dependencies.

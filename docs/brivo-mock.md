@@ -54,7 +54,7 @@ Mock accepts any `api-key` header value — no token flow simulated.
 }
 ```
 
-`externalId` is Brivo's own field for referencing the user in an external system — it is set by the API caller, not by Brivo. `POST /users` returns `200` (not `201`) on success.
+`externalId` is Brivo's own field for referencing the user in an external system — it is set by the API caller. The bridge never sets this field; `externalId` is a bridge-internal concept only. `POST /users` returns `200` (not `201`) on success.
 
 ### Group (Brivo)
 ```json
