@@ -1,23 +1,19 @@
 # Architecture
 
 Automated identity lifecycle management from Okta into Brivo via SCIM 2.0.
-Ensures reliability under rate limits, incomplete downstream data, and multi-step provisioning workflows.
+Ensures reliability under rate limits and multi-step provisioning workflows.
 
 ## Flow
 
 ```mermaid
 flowchart LR
     Okta -->|SCIM 2.0| Bridge["SCIM Bridge\n(FastAPI)"]
-    Bridge <-->|reads + writes| DB[(PostgreSQL)]
+    Bridge <-->|ID mappings + response cache| Redis
     Bridge --> Saga["Saga Orchestrator"]
     Saga -->|HTTP| Brivo["Mock Brivo Client"]
-    Saga -->|resource writes + saga state| DB
-    Bridge <-->|cache| Redis
-    Recon["Reconcile Job"] -->|poll| Brivo
-    Recon -->|sync out-of-band changes| DB
 ```
 
-**Bridge DB is the source of truth for all reads.** Brivo is the authoritative downstream target — it receives every write, but is never queried on the read path. The reconcile job catches out-of-band Brivo mutations and syncs them back to the bridge DB.
+**Brivo is the source of truth for all resource state.** Every integration starts with an empty Brivo database. Redis stores permanent ID mappings (`scim_id ↔ target_id ↔ external_id`) and caches Brivo responses to absorb read traffic within the rate limit budget.
 
 ## Roles
 
@@ -25,28 +21,26 @@ flowchart LR
 |---|---|
 | Okta | Identity Provider (IdP) — initiates provisioning, owns `external_id` |
 | SCIM Bridge | Intermediary SCIM server — owns `scim_id`, translates to target API |
-| Brivo | Target system — receives provisioning actions, owns `target_id` |
+| Brivo | Source of truth — authoritative resource state, owns `target_id` |
 
 ## Components
 
 | Component | Responsibility | Detail |
 |---|---|---|
-| SCIM Bridge | Translate SCIM 2.0 operations to target API calls; serves all reads from DB | [scim-server.md](scim-server.md) |
+| SCIM Bridge | Translate SCIM 2.0 operations to target API calls; serves reads from Brivo via Redis cache | [scim-server.md](scim-server.md) |
 | Mock Brivo Client | Simulate Brivo API with configurable failure modes | [brivo-mock.md](brivo-mock.md) |
 | Rate Limiter | Enforce target request rate limit | [rate-limiter.md](rate-limiter.md) |
-| Saga Orchestrator | Coordinate multi-step operations with rollback; writes resource state to DB | [saga.md](saga.md) |
-| PostgreSQL | Source of truth: resource state (users, groups, members) + ID mappings + audit trail | [database.md](database.md) |
-| Redis | Cache layer for hot resource and ID lookups | [redis.md](redis.md) |
-| Reconcile Job | Polls Brivo periodically; syncs out-of-band mutations back to bridge DB | [database.md § Reconciliation](database.md) |
+| Saga Orchestrator | Coordinate multi-step operations with rollback | [saga.md](saga.md) |
+| Redis | ID mapping store (permanent) + Brivo response cache (TTL) | [redis.md](redis.md) |
 
 ## Constraints
 
-- Bridge DB is source of truth for reads — never query Brivo on the read path
-- Target system enforces a rate limit — enforce at client layer, never drop under normal load
-- Target responses may be partial/incomplete — handle gracefully on write path only
+- Brivo is source of truth — reads go through Brivo (via Redis cache); Redis cache absorbs repeat reads
+- Target system enforces a rate limit — enforce at client layer; cache prevents unnecessary Brivo calls
+- ID mappings are permanent in Redis — no TTL; deleted only on resource delete
 - All operations must be **idempotent** and retry-safe
 - Multi-step operations must define forward + compensating (rollback) actions
-- Out-of-band Brivo mutations are tolerated until the next reconcile cycle — bridge DB may be briefly stale
+- Idempotency enforced via Redis `SET NX` lock on `external_id`; crash recovery via lock expiry + IdP retry
 
 ## Deliverables
 
@@ -56,7 +50,6 @@ flowchart LR
 | Mock Brivo client | [brivo-mock.md](brivo-mock.md) |
 | Rate limiter module | [rate-limiter.md](rate-limiter.md) |
 | Saga orchestrator | [saga.md](saga.md) |
-| Database integration | [database.md](database.md) |
 | Redis integration | [redis.md](redis.md) |
 | Infra (Docker + Compose) | [infra.md](infra.md) |
 | Testing strategy | [testing.md](testing.md) |

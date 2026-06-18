@@ -1,58 +1,71 @@
 # Redis Integration
 
-Redis serves as a **cache** for hot DB lookups backed by PostgreSQL. DB is always the source of truth — Redis is read-through only.
+Redis serves two purposes:
 
-Resource state, ID mappings, and saga state are owned by PostgreSQL — see [database.md](database.md).
-
-## Cache Effectiveness
-
-Two cache key types serve different access patterns:
-
-| Key type | Used by | Repetition | Value |
-|---|---|---|---|
-| `cache:ext` (`external_id` → `scim_id`) | `externalId eq` filter; saga idempotency lookups | Low-medium | Low — DB index scan is fast enough; cache is a low-cost bonus |
-| `cache:scim` (`scim_id` → `target_id`) | Write path: all sagas that call Brivo with a `target_id`; PATCH add/remove member; Update User/Group | N members per bulk create; 1 per PATCH | **High** — every Brivo write needs `target_id`; cache avoids repeated DB hits on bulk ops |
-
-Single-resource GETs (`GET /Users/{id}`, `GET /Groups/{id}`) read from bridge DB directly — no `target_id` needed on the read path, so cache is not consulted for reads.
+1. **ID mapping store** — permanent store for `scim_id ↔ target_id ↔ external_id`. No TTL. No database needed.
+2. **Brivo response cache** — TTL-based cache absorbing Brivo read traffic to stay within rate limit budget.
 
 ## Key Inventory
 
-| Key | Type | Value | TTL |
-|---|---|---|---|
-| `cache:{target}:scim:{type}:{scim_id}` | string | JSON `{ target_id, external_id }` | 5 min |
-| `cache:{target}:ext:{type}:{external_id}` | string | JSON `{ scim_id, target_id }` | 5 min |
+### ID Mappings (permanent — no TTL)
+
+| Key | Type | Value |
+|---|---|---|
+| `idmap:{target}:scim:{type}:{scim_id}` | string | JSON `{ target_id, external_id, created_at }` |
+| `idmap:{target}:ext:{type}:{external_id}` | string | JSON `{ scim_id, target_id }` |
 
 `type` is `user` or `group`. `target` is the downstream system identifier (e.g. `brivo`).
 
-**Cache-aside pattern:** read Redis first; on miss query DB, populate cache. Invalidated explicitly on resource delete.
+Written atomically on saga completion. No TTL — deleted only when the resource is deleted.
+
+`created_at` stored in the `scim` key is used to populate `meta.created` in SCIM responses (Brivo does not expose creation timestamps).
+
+### Idempotency Locks (short TTL)
+
+| Key | Type | Value | TTL |
+|---|---|---|---|
+| `lock:{target}:create:{type}:{external_id}` | string | `saga_id` | 300 s |
+
+Set with `SET NX EX 300` at saga step 0. Atomic duplicate-create guard — replaces the DB UNIQUE constraint. Deleted on saga completion or rollback. Expires automatically on bridge crash; IdP retry succeeds after the 5-minute window.
+
+### Brivo Response Cache (TTL)
+
+| Key | Type | Value | TTL |
+|---|---|---|---|
+| `cache:{target}:user:{target_id}` | string | JSON Brivo user object | 5 min |
+| `cache:{target}:group:{target_id}` | string | JSON Brivo group object | 5 min |
+| `cache:{target}:group:{target_id}:members` | string | JSON array of Brivo user IDs | 5 min |
+
+Cache-aside: read cache first, on miss call Brivo and populate. Explicitly invalidated on write; TTL is a safety net.
+
+## Access Patterns
+
+### Read path
+
+| Operation | Keys touched |
+|---|---|
+| Resolve `scim_id → target_id` | Read `idmap:{target}:scim:{type}:{scim_id}` |
+| Resolve `external_id → scim_id` | Read `idmap:{target}:ext:{type}:{external_id}` |
+| GET user/group | Read `cache:{target}:user/group:{target_id}` → miss: Brivo GET, populate cache |
+| GET group members | Read `cache:{target}:group:{target_id}:members` → miss: Brivo GET, populate cache |
+| List / filter | Read `cache:{target}:user/group:{target_id}` per resource; on miss: Brivo GET per resource |
+
+### Write path (saga)
+
+| Operation | Keys touched |
+|---|---|
+| Create resource (step 0) | `SET NX EX 300 lock:{target}:create:{type}:{external_id}` |
+| Create resource (complete) | DEL lock key; SET `idmap:scim` and `idmap:ext` (no TTL) |
+| Update resource | DEL `cache:{target}:user/group:{target_id}` |
+| Add/remove group member | DEL `cache:{target}:group:{target_id}:members` |
+| Delete resource | DEL idmap keys + all cache keys for the resource |
 
 ## Invalidation Rules
 
 | Key pattern | Invalidated by |
 |---|---|
-| `cache:{target}:scim:{type}:{scim_id}` | Delete User saga step 4; Delete Group saga step 2; reconcile job on 404 |
-| `cache:{target}:ext:{type}:{external_id}` | Delete User saga step 4; Delete Group saga step 2; reconcile job on 404 |
-
-TTL is a safety net — explicit invalidation keeps cache consistent without waiting for expiry.
-
-## Self-Healing on Target 404
-
-Triggered on the write path (saga Brivo call returns `404`) or by the reconcile job. Reads never touch Brivo, so 404s only surface during writes or reconciliation.
-
-If Brivo returns `404` for a resource that has a DB mapping (stale — target mutated out-of-band):
-
-1. `DELETE FROM users/groups WHERE scim_id=?` (resource-type-appropriate)
-2. `DELETE FROM group_members WHERE group_scim_id=? OR user_scim_id=?`
-3. `DELETE FROM integrations WHERE scim_id=?`
-4. DEL both cache keys from Redis
-5. Return `404` to caller (write path) or skip resource (reconcile)
-
-## Access Patterns
-
-| Operation | Redis keys touched |
-|---|---|
-| Resolve `scim_id → target_id` (write path) | Read `cache:{target}:scim:{type}:{scim_id}` (miss → query DB, populate cache) |
-| Resolve `external_id → scim_id` (filter/saga) | Read `cache:{target}:ext:{type}:{external_id}` (miss → query DB, populate cache) |
-| Create resource (saga complete) | Populate both cache keys |
-| Delete resource | DEL both cache keys |
-| Read resource (GET /Users/{id}, GET /Groups/{id}) | Not cached — served directly from bridge DB |
+| `idmap:{target}:scim:{type}:{scim_id}` | Delete User saga; Delete Group saga |
+| `idmap:{target}:ext:{type}:{external_id}` | Delete User saga; Delete Group saga |
+| `cache:{target}:user:{target_id}` | Update User (write-modify-write); Delete User saga |
+| `cache:{target}:group:{target_id}` | PATCH/PUT group attrs; Delete Group saga |
+| `cache:{target}:group:{target_id}:members` | Add Member saga; Remove Member saga; Update Group saga; Delete Group saga |

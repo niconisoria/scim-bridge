@@ -1,6 +1,6 @@
 # Saga Orchestrator
 
-All multi-step target provisioning operations use the saga pattern. Each operation defines ordered forward steps and compensating (rollback) steps. State persisted in PostgreSQL `provisioning_actions` table (→ [database.md](database.md)) before execution begins.
+All multi-step target provisioning operations use the saga pattern. Each operation defines ordered forward steps and compensating (rollback) steps. Saga state is in-memory — on crash, IdP retries and the idempotency lock (Redis) gates re-entry.
 
 ## State Machine
 
@@ -15,11 +15,9 @@ On any step failure: transition saga to `compensating`, execute rollbacks in rev
 Per-step retries via `tenacity`: exponential backoff with jitter, max 3 attempts.
 After 3 failures: mark step `failed`, trigger rollback.
 
-## Orphaned Sagas on Restart
+## Crash Recovery
 
-If the bridge restarts while a saga is `running`, the row remains in `provisioning_actions` with status `running` but no process will resume it. On restart, the bridge does **not** auto-resume in-progress sagas — behavior relies on the IdP retrying the operation.
-
-Cleanup: startup task marks stale `running` sagas as `failed`. Associated `pending` integration rows are **not deleted** — they act as tombstones preventing duplicate creation on IdP retry (retry hits UNIQUE constraint on `external_id` → `409`). Operator must manually clear stuck `pending` rows after investigating.
+Saga state is in-memory. Bridge crash = in-progress saga is lost. The idempotency lock (`lock:{target}:create:{type}:{external_id}`, TTL 300 s) expires automatically. IdP retries → `SET NX` succeeds → new saga proceeds cleanly.
 
 ## Operations
 
@@ -27,94 +25,90 @@ Cleanup: startup task marks stale `running` sagas as `failed`. Associated `pendi
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., status='pending')`. `INSERT INTO users (scim_id, username, given_name, ...)`. On `UniqueViolationError` on integrations → return `409`. Record saga in `provisioning_actions`. | DELETE users row; DELETE integrations row |
-| 1 | `POST /target/users` → save `target_id` to saga steps JSONB | `DELETE /target/users/{target_id}` |
-| 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE users row; DELETE integrations row; invalidate Redis cache |
+| 0 | Generate `scim_id` (UUID v4). `SET NX EX 300 lock:brivo:create:user:{external_id}` — if key exists → `409`. | DEL lock key |
+| 1 | `POST /target/users` → save `target_id` to saga state | `DELETE /target/users/{target_id}` |
+| 2 | Write `idmap:brivo:scim:user:{scim_id}` and `idmap:brivo:ext:user:{external_id}` (permanent, no TTL). DEL lock key. | DEL both idmap keys |
 
 ### Delete User
 
-Router resolves `scim_id` (URL param) → `target_id` via DB/cache before invoking saga; if missing → `404`.
+Router resolves `scim_id` → `target_id` via Redis idmap; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Fetch user's group memberships from `group_members` table; save list to saga steps JSONB | Re-insert rows into `group_members`; re-add user to each target group |
-| 2 | `DELETE` user from each target group (Brivo first); `DELETE FROM group_members WHERE user_scim_id=?` (DB second — after Brivo confirms) | (covered by step 1 rollback) |
+| 1 | `GET /target/groups` filtered by user membership (or Brivo member list endpoint); save group `target_id` list to saga state | — |
+| 2 | For each group: `DELETE /target/groups/{target_group_id}/users/{target_id}`; DEL `cache:brivo:group:{target_group_id}:members` | Re-add user to each group; repopulate member cache |
 | 3 | `DELETE /target/users/{target_id}` | **Not recoverable** — log structured alert |
-| 4 | `DELETE FROM users WHERE scim_id=?`; `DELETE FROM integrations WHERE ...`. Invalidate Redis cache. | Restore users row; restore integration row; repopulate cache |
+| 4 | DEL `idmap:brivo:scim:user:{scim_id}`; DEL `idmap:brivo:ext:user:{external_id}`; DEL `cache:brivo:user:{target_id}` | Restore idmap keys |
 
 > Step 3 rollback is unrecoverable. Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
 
 ### Delete Group
 
-Router resolves `scim_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+Router resolves `scim_id` → `target_group_id` via Redis idmap; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
 | 1 | `DELETE /target/groups/{target_group_id}` | **Not recoverable** — log structured alert |
-| 2 | `DELETE FROM group_members WHERE group_scim_id=?`; `DELETE FROM groups WHERE scim_id=?`; `DELETE FROM integrations WHERE ...`. Invalidate Redis cache. | Restore groups row; restore integrations row; repopulate cache |
+| 2 | DEL `idmap:brivo:scim:group:{scim_id}`; DEL `idmap:brivo:ext:group:{external_id}`; DEL `cache:brivo:group:{target_group_id}`; DEL `cache:brivo:group:{target_group_id}:members` | Restore idmap keys |
 
-> Step 1 rollback is unrecoverable (group gone from target). Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
-
-> `group_members` rows are deleted in step 2 alongside the group — target removes its own member associations when the group is deleted, so bridge DB must mirror that.
+> Step 1 rollback is unrecoverable (group gone from Brivo). Saga marks `failed`, emits error log with `saga_id`. IdP must retry the full provisioning cycle.
 
 ### Create Group (with members)
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | **Lock + idempotency check:** `INSERT INTO integrations (..., resource_type='group', status='pending')`. `INSERT INTO groups (scim_id, display_name)`. On `UniqueViolationError` on integrations → return `409`. Record saga in `provisioning_actions`. | DELETE groups row; DELETE integrations row |
-| 1 | `POST /target/groups` → save `target_group_id` to saga steps JSONB | `DELETE /target/groups/{target_group_id}` |
-| 2 | `UPDATE integrations SET target_id=?, status='active'`. Populate Redis cache. | DELETE groups row; DELETE integrations row; invalidate Redis cache |
-| 3 | For each member: resolve `scim_user_id` → `target_user_id` from DB/cache (if missing → `400`, abort before step 3 starts); `PUT /target/groups/{target_group_id}/users/{target_user_id}`; `INSERT INTO group_members (group_scim_id, user_scim_id)`; append `target_user_id` to `saga.steps[3].added_members` in JSONB after each success | `DELETE FROM group_members WHERE group_scim_id=? AND user_scim_id=?`; `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each in `added_members` in reverse |
+| 0 | Generate `scim_id` (UUID v4). `SET NX EX 300 lock:brivo:create:group:{external_id}` — if key exists → `409`. | DEL lock key |
+| 1 | `POST /target/groups` → save `target_group_id` to saga state | `DELETE /target/groups/{target_group_id}` |
+| 2 | Write `idmap:brivo:scim:group:{scim_id}` and `idmap:brivo:ext:group:{external_id}` (permanent). DEL lock key. | DEL both idmap keys |
+| 3 | For each member: resolve `scim_user_id → target_user_id` from Redis idmap (if any missing → `400`, abort before step 3 starts); `PUT /target/groups/{target_group_id}/users/{target_user_id}`; append `target_user_id` to `added_members` in saga state after each success. DEL `cache:brivo:group:{target_group_id}:members`. | `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each in `added_members` in reverse; DEL cache key |
 
-> Step 3 member resolution: if any `scim_user_id` has no integration mapping, the entire saga aborts before executing any target member calls — return `400` to caller.
-
-> Step 3 rollback uses `added_members` accumulated in saga steps JSONB to know exactly which members were successfully added before the failure.
+> Step 3 member resolution: if any `scim_user_id` has no idmap entry, the entire saga aborts before executing any Brivo member calls — return `400` to caller.
 
 ### Add Member(s) to Group (PATCH `add`)
 
-Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+Router resolves `scim_group_id` → `target_group_id` via Redis idmap; if missing → `404`.
 
-One `add` op may include N members in `value[]`. Resolve all `scim_user_id → target_user_id` upfront (return `400` if any missing), then execute each as a separate step — same pattern as Create Group step 3.
+One `add` op may include N members in `value[]`. Resolve all upfront (return `400` if any missing), then execute each.
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Resolve all `scim_user_id → target_user_id` from DB/cache; if any missing → `400` | — |
-| 2 | For each member: `PUT /target/groups/{target_group_id}/users/{target_user_id}`; `INSERT INTO group_members (group_scim_id, user_scim_id) ON CONFLICT DO NOTHING`; append `target_user_id` to `added_members` in saga JSONB | `DELETE FROM group_members WHERE ...`; `DELETE /target/.../users/{target_user_id}` for each in `added_members` in reverse |
+| 1 | Resolve all `scim_user_id → target_user_id` from Redis idmap; if any missing → `400` | — |
+| 2 | For each member: `PUT /target/groups/{target_group_id}/users/{target_user_id}`; append to `added_members` in saga state. DEL `cache:brivo:group:{target_group_id}:members`. | `DELETE /target/.../users/{target_user_id}` for each in `added_members` in reverse; DEL cache key |
 
 ### Remove Member from Group (PATCH `remove`)
 
-Router resolves `scim_group_id` (URL param) → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+Router resolves `scim_group_id` → `target_group_id` via Redis idmap; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Resolve `scim_user_id` → `target_user_id` from DB/cache; if missing → `400` | — |
-| 2 | `DELETE /target/groups/{target_group_id}/users/{target_user_id}`; `DELETE FROM group_members WHERE group_scim_id=? AND user_scim_id=?` | `INSERT INTO group_members ...`; `PUT /target/groups/{target_group_id}/users/{target_user_id}` |
+| 1 | Resolve `scim_user_id → target_user_id` from Redis idmap; if missing → `400` | — |
+| 2 | `DELETE /target/groups/{target_group_id}/users/{target_user_id}`. DEL `cache:brivo:group:{target_group_id}:members`. | `PUT /target/groups/{target_group_id}/users/{target_user_id}`; repopulate cache |
 
 ### Update User (PUT or PATCH `replace`)
 
-Router resolves `scim_id` → `target_id` via DB/cache before calling Brivo; if missing → `404`.
+Router resolves `scim_id → target_id` via Redis idmap; if missing → `404`.
 
 Read-modify-write — no saga:
-1. `SELECT * FROM users WHERE scim_id=?` → current SCIM state (no Brivo call)
-2. Merge PUT fields or PATCH replace ops into full user object
-3. `PUT /target/users/{target_id}` with mapped Brivo payload — `tenacity` retries on failure
-4. `UPDATE users SET ..., updated_at=now() WHERE scim_id=?`
-5. Return updated SCIM resource from bridge DB
+1. Read `cache:brivo:user:{target_id}` → on miss: `GET /target/users/{target_id}`, populate cache
+2. Merge PUT fields or PATCH replace ops into full Brivo user object
+3. `PUT /target/users/{target_id}` — `tenacity` retries on failure
+4. DEL `cache:brivo:user:{target_id}`
+5. Return updated resource (map Brivo response → SCIM)
 
 ### Update Group (PUT)
 
-Router resolves `scim_id` → `target_group_id` via DB/cache before invoking saga; if missing → `404`.
+Router resolves `scim_id → target_group_id` via Redis idmap; if missing → `404`.
 
 | Step | Forward | Rollback |
 |---|---|---|
-| 1 | Save current `display_name` from `groups` table to saga JSONB; `PUT /target/groups/{target_group_id}` with new `name`; `UPDATE groups SET display_name=? WHERE scim_id=?` | `PUT /target/groups/{target_group_id}` with original name; `UPDATE groups SET display_name=original WHERE scim_id=?` |
-| 2 | `SELECT user_scim_id FROM group_members WHERE group_scim_id=?` → save current member list to saga JSONB (no Brivo call) | — |
-| 3 | Resolve all new `members[]` `scim_id → target_user_id` (if any missing → `400`, abort) | — |
-| 4 | Add new members: `PUT /target/groups/{target_group_id}/users/{target_user_id}` for each; `INSERT INTO group_members ...`; track in `added_members` | `DELETE FROM group_members ...`; `DELETE /target/.../users/{target_user_id}` for each in `added_members` |
-| 5 | Remove old members: `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each; `DELETE FROM group_members ...`; track in `removed_members` | `INSERT INTO group_members ...`; `PUT /target/.../users/{target_user_id}` for each in `removed_members` |
+| 1 | Read current group from `cache:brivo:group:{target_group_id}` (miss → Brivo GET); save `name` to saga state; `PUT /target/groups/{target_group_id}` with new `name`; DEL group cache key | `PUT /target/groups/{target_group_id}` with original name; DEL cache key |
+| 2 | Fetch current member list from `cache:brivo:group:{target_group_id}:members` (miss → Brivo GET); save to saga state | — |
+| 3 | Resolve all new `members[]` `scim_id → target_user_id` from Redis idmap (if any missing → `400`, abort) | — |
+| 4 | Add new members: `PUT /target/groups/{target_group_id}/users/{target_user_id}` for each; track in `added_members` | `DELETE /target/.../users/{target_user_id}` for each in `added_members` |
+| 5 | Remove old members: `DELETE /target/groups/{target_group_id}/users/{target_user_id}` for each; track in `removed_members`. DEL `cache:brivo:group:{target_group_id}:members`. | `PUT /target/.../users/{target_user_id}` for each in `removed_members`; DEL cache key |
 
 ### PATCH `replace` Group Attributes
 
-Router resolves `scim_id` → `target_group_id` via DB/cache before calling Brivo; if missing → `404`.
+Router resolves `scim_id → target_group_id` via Redis idmap; if missing → `404`.
 
-No saga: `PUT /target/groups/{target_group_id}` with updated `name`; `UPDATE groups SET display_name=? WHERE scim_id=?`. `tenacity` retries on Brivo call.
+No saga: `PUT /target/groups/{target_group_id}` with updated `name`; DEL `cache:brivo:group:{target_group_id}`. `tenacity` retries on Brivo call.

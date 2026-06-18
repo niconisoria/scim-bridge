@@ -19,15 +19,13 @@
 | Server | Uvicorn |
 | Validation | Pydantic v2 |
 | Settings | pydantic-settings |
-| Database | PostgreSQL + SQLAlchemy 2.0 (async) + asyncpg |
-| Migrations | Alembic |
-| Cache | Redis (redis-py asyncio) |
+| ID store + Cache | Redis (redis-py asyncio) — permanent ID mappings + Brivo response cache |
 | HTTP client | httpx (AsyncClient) |
 | Rate limiting | aiolimiter (leaky bucket) |
 | Retries | tenacity |
 | Logging | structlog |
 | Testing | pytest + pytest-asyncio + httpx |
-| Test mocks | pytest-postgresql + fakeredis + respx |
+| Test mocks | fakeredis + respx |
 | Infra | Docker + Compose |
 
 ---
@@ -38,8 +36,6 @@
 scim-bridge/
 ├── CLAUDE.md               ← you are here
 ├── main.py                 ← FastAPI app entry point
-├── alembic/                ← migration scripts
-│   └── versions/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── docs/
@@ -50,8 +46,7 @@ scim-bridge/
 │   ├── models/             ← Pydantic schemas (SCIM resources)
 │   ├── services/           ← SCIM logic, saga orchestrator
 │   ├── brivo/              ← Brivo client + rate limiter
-│   ├── db/                 ← SQLAlchemy models, session, repositories
-│   ├── redis/              ← cache layer
+│   ├── redis/              ← ID mapping store + Brivo response cache
 │   └── core/               ← config, auth middleware, error handlers, logging
 ├── tests/
 │   ├── unit/
@@ -74,12 +69,11 @@ scim-bridge/
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md) — global system view, components, constraints
-- [docs/database.md](docs/database.md) — schema, migrations, access patterns
 - [docs/scim-server.md](docs/scim-server.md) — SCIM 2.0 endpoints, schemas, auth, field mapping
 - [docs/brivo-mock.md](docs/brivo-mock.md) — mock Brivo API, failure simulation
 - [docs/rate-limiter.md](docs/rate-limiter.md) — leaky bucket, 429 handling
 - [docs/saga.md](docs/saga.md) — saga state machine, all multi-step operations
-- [docs/redis.md](docs/redis.md) — cache key inventory, TTL strategy, access patterns
+- [docs/redis.md](docs/redis.md) — ID mapping store + Brivo response cache: key inventory, TTL strategy, access patterns
 - [docs/logging.md](docs/logging.md) — structlog fields, levels
 - [docs/testing.md](docs/testing.md) — unit + integration test strategy
 - [docs/infra.md](docs/infra.md) — Docker services, env vars
