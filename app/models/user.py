@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.common import ScimMeta
+
 _SCIM_USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User"
 
 
@@ -18,14 +20,6 @@ class ScimPhone(BaseModel):
 class ScimName(BaseModel):
     givenName: str | None = None
     familyName: str | None = None
-
-
-class ScimMeta(BaseModel):
-    resourceType: str | None = None
-    location: str | None = None
-    created: str | None = None
-    lastModified: str | None = None
-    version: str | None = None
 
 
 class ScimUser(BaseModel):

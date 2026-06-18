@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.user import ScimMeta
+from app.models.common import ScimMeta
 
 _SCIM_GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group"
 

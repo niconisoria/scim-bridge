@@ -23,7 +23,7 @@
 
 - [x] #11 Implement `app/models/user.py` — SCIM User schemas
 - [x] #12 Implement `app/models/group.py` — SCIM Group schemas (displayName ≤ 35 chars)
-- [ ] #13 Implement `app/models/common.py` — ListResponse, PatchOp, Error, Meta
+- [x] #13 Implement `app/models/common.py` — ListResponse, PatchOp, Error, Meta
 - [ ] #14 Implement `app/models/brivo.py` — Brivo User, Group, paginated list (used by bridge only — mock Brivo defines its own inline schemas)
 
 ## Phase 4 — Mock Brivo Service
