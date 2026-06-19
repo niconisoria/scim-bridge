@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 # --- Inline models (no app/ imports) ---
 
+
 class BrivoEmail(BaseModel):
     address: str
     type: str = "work"
@@ -20,6 +21,7 @@ class BrivoPhone(BaseModel):
 
 class BrivoUser(BaseModel):
     id: int
+    externalId: str | None = None
     firstName: str
     lastName: str
     emails: list[BrivoEmail] = []
@@ -27,6 +29,15 @@ class BrivoUser(BaseModel):
     suspended: bool = False
     created: datetime
     updated: datetime
+
+
+class BrivoUserIn(BaseModel):
+    externalId: str | None = None
+    firstName: str
+    lastName: str
+    emails: list[BrivoEmail] = []
+    phoneNumbers: list[BrivoPhone] = []
+    suspended: bool = False
 
 
 class BrivoGroup(BaseModel):
@@ -56,6 +67,7 @@ class BrivoPage(BaseModel, Generic[T]):
 
 users: dict[int, BrivoUser] = {}
 groups: dict[int, BrivoGroup] = {}
+group_members: dict[int, set[int]] = {}
 _counters: dict[str, int] = {"users": 0, "groups": 0}
 
 
@@ -66,10 +78,12 @@ def next_id(resource: str) -> int:
 
 # --- App ---
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     users.clear()
     groups.clear()
+    group_members.clear()
     _counters["users"] = 0
     _counters["groups"] = 0
     yield
@@ -80,16 +94,20 @@ app = FastAPI(lifespan=lifespan)
 
 # --- Auth middleware ---
 
+
 @app.middleware("http")
 async def require_api_key(request: Request, call_next):
     if request.url.path == "/health":
         return await call_next(request)
     if not request.headers.get("api-key"):
-        return JSONResponse(status_code=403, content={"code": 403, "message": "Forbidden"})
+        return JSONResponse(
+            status_code=403, content={"code": 403, "message": "Forbidden"}
+        )
     return await call_next(request)
 
 
 # --- Endpoints ---
+
 
 @app.get("/health")
 async def health():
@@ -99,12 +117,72 @@ async def health():
 @app.get("/v1/api/users")
 async def list_users(offset: int = 0, pageSize: int = 20):
     items = list(users.values())
-    page = items[offset: offset + pageSize]
-    return BrivoPage[BrivoUser](data=page, offset=offset, pageSize=pageSize, count=len(items))
+    page = items[offset : offset + pageSize]
+    return BrivoPage[BrivoUser](
+        data=page, offset=offset, pageSize=pageSize, count=len(items)
+    )
+
+
+@app.post("/v1/api/users")
+async def create_user(body: BrivoUserIn):
+    now = datetime.now(timezone.utc)
+    user = BrivoUser(id=next_id("users"), created=now, updated=now, **body.model_dump())
+    users[user.id] = user
+    return user
+
+
+@app.get("/v1/api/users/{userId}")
+async def get_user(userId: int):
+    user = users.get(userId)
+    if not user:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    return user
+
+
+@app.put("/v1/api/users/{userId}")
+async def update_user(userId: int, body: BrivoUserIn):
+    user = users.get(userId)
+    if not user:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    updated = user.model_copy(
+        update={**body.model_dump(), "updated": datetime.now(timezone.utc)}
+    )
+    users[userId] = updated
+    return updated
+
+
+@app.delete("/v1/api/users/{userId}", status_code=204)
+async def delete_user(userId: int):
+    if userId not in users:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    del users[userId]
+
+
+@app.get("/v1/api/users/{userId}/groups")
+async def list_user_groups(userId: int):
+    if userId not in users:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    user_group_ids = {
+        gid for gid, members in group_members.items() if userId in members
+    }
+    data = [
+        {"id": g.id, "name": g.name} for gid in user_group_ids if (g := groups.get(gid))
+    ]
+    return {"count": len(data), "data": data}
 
 
 @app.get("/v1/api/groups")
 async def list_groups(offset: int = 0, pageSize: int = 20):
     items = list(groups.values())
-    page = items[offset: offset + pageSize]
-    return BrivoPage[BrivoGroup](data=page, offset=offset, pageSize=pageSize, count=len(items))
+    page = items[offset : offset + pageSize]
+    return BrivoPage[BrivoGroup](
+        data=page, offset=offset, pageSize=pageSize, count=len(items)
+    )
