@@ -48,6 +48,13 @@ class BrivoGroup(BaseModel):
     antipassbackResetTime: int = 0
 
 
+class BrivoGroupIn(BaseModel):
+    name: str
+    keypadUnlock: bool = False
+    immuneToAntipassback: bool = False
+    antipassbackResetTime: int = 0
+
+
 class BrivoError(BaseModel):
     code: int
     message: str
@@ -186,3 +193,90 @@ async def list_groups(offset: int = 0, pageSize: int = 20):
     return BrivoPage[BrivoGroup](
         data=page, offset=offset, pageSize=pageSize, count=len(items)
     )
+
+
+@app.post("/v1/api/groups")
+async def create_group(body: BrivoGroupIn):
+    if len(body.name) > 35:
+        return JSONResponse(
+            status_code=400,
+            content={"code": 400, "message": "name exceeds 35 characters"},
+        )
+    group = BrivoGroup(id=next_id("groups"), **body.model_dump())
+    groups[group.id] = group
+    return group
+
+
+@app.get("/v1/api/groups/{groupId}")
+async def get_group(groupId: int):
+    group = groups.get(groupId)
+    if not group:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    return group
+
+
+@app.put("/v1/api/groups/{groupId}")
+async def update_group(groupId: int, body: BrivoGroupIn):
+    if groupId not in groups:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    if len(body.name) > 35:
+        return JSONResponse(
+            status_code=400,
+            content={"code": 400, "message": "name exceeds 35 characters"},
+        )
+    groups[groupId] = BrivoGroup(id=groupId, **body.model_dump())
+    return groups[groupId]
+
+
+@app.delete("/v1/api/groups/{groupId}", status_code=204)
+async def delete_group(groupId: int):
+    if groupId not in groups:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    del groups[groupId]
+    group_members.pop(groupId, None)
+
+
+@app.get("/v1/api/groups/{groupId}/users")
+async def list_group_users(groupId: int, offset: int = 0, pageSize: int = 20):
+    if groupId not in groups:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    member_ids = group_members.get(groupId, set())
+    items = [users[uid] for uid in member_ids if uid in users]
+    page = items[offset : offset + pageSize]
+    return BrivoPage[BrivoUser](
+        data=page, offset=offset, pageSize=pageSize, count=len(items)
+    )
+
+
+@app.put("/v1/api/groups/{groupId}/users/{userId}", status_code=204)
+async def add_user_to_group(groupId: int, userId: int):
+    if groupId not in groups:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    if userId not in users:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    group_members.setdefault(groupId, set()).add(userId)
+
+
+@app.delete("/v1/api/groups/{groupId}/users/{userId}", status_code=204)
+async def remove_user_from_group(groupId: int, userId: int):
+    if groupId not in groups:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    if userId not in users:
+        return JSONResponse(
+            status_code=404, content={"code": 404, "message": "Not found"}
+        )
+    group_members.get(groupId, set()).discard(userId)

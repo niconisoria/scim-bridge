@@ -32,7 +32,7 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 
 - [x] #15 Mock Brivo skeleton — FastAPI app, `/health`, in-memory store, inline schemas
 - [x] #16 Mock Brivo user endpoints — list, create, get, update, delete, list user's groups
-- [ ] #17 Mock Brivo group endpoints + member management
+- [x] #17 Mock Brivo group endpoints + member management
 - [ ] #18 Mock Brivo behavior simulation — latency, error rate, partial responses, 429
 
 ## Phase 5 — Brivo Client
