@@ -1,3 +1,8 @@
+import asyncio
+import collections
+import os
+import random
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Generic, TypeVar
@@ -76,6 +81,7 @@ users: dict[int, BrivoUser] = {}
 groups: dict[int, BrivoGroup] = {}
 group_members: dict[int, set[int]] = {}
 _counters: dict[str, int] = {"users": 0, "groups": 0}
+_request_times: collections.deque = collections.deque()
 
 
 def next_id(resource: str) -> int:
@@ -91,6 +97,7 @@ async def lifespan(app: FastAPI):
     users.clear()
     groups.clear()
     group_members.clear()
+    _request_times.clear()
     _counters["users"] = 0
     _counters["groups"] = 0
     yield
@@ -110,6 +117,40 @@ async def require_api_key(request: Request, call_next):
         return JSONResponse(
             status_code=403, content={"code": 403, "message": "Forbidden"}
         )
+    return await call_next(request)
+
+
+# --- Simulation middleware ---
+
+
+@app.middleware("http")
+async def simulate_brivo_behavior(request: Request, call_next):
+    if request.url.path == "/health":
+        return await call_next(request)
+
+    rate_limit = int(os.getenv("BRIVO_RATE_LIMIT", "0") or "0")
+    if rate_limit > 0:
+        now = time.monotonic()
+        while _request_times and _request_times[0] < now - 1.0:
+            _request_times.popleft()
+        if len(_request_times) >= rate_limit:
+            return JSONResponse(
+                status_code=429, content={"code": 429, "message": "Rate limit exceeded"}
+            )
+        _request_times.append(now)
+
+    error_rate = float(os.getenv("BRIVO_ERROR_RATE", "0") or "0")
+    if error_rate > 0 and random.random() < error_rate:
+        status = random.choice([500, 503])
+        return JSONResponse(
+            status_code=status, content={"code": status, "message": "Simulated error"}
+        )
+
+    latency_ms = int(os.getenv("BRIVO_LATENCY_MS", "0") or "0")
+    if latency_ms > 0:
+        min_ms = min(50, latency_ms)
+        await asyncio.sleep(random.randint(min_ms, latency_ms) / 1000)
+
     return await call_next(request)
 
 
@@ -145,6 +186,8 @@ async def get_user(userId: int):
         return JSONResponse(
             status_code=404, content={"code": 404, "message": "Not found"}
         )
+    if userId % 2 == 0:
+        user = user.model_copy(update={"phoneNumbers": []})
     return user
 
 
