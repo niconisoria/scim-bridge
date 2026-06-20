@@ -38,7 +38,7 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 ## Phase 5 — Brivo Client
 
 - [x] #19 Implement `app/brivo/client.py` — httpx wrapper for all Brivo endpoints
-- [ ] #20 Implement `app/brivo/rate_limiter.py` — aiolimiter + tenacity 429 handling
+- [x] #20 Implement `app/brivo/rate_limiter.py` — aiolimiter + tenacity 429 handling
 
 ## Phase 6 — Field Mapper
 
