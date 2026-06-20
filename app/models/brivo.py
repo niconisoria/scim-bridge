@@ -78,10 +78,3 @@ class BrivoPaginatedList(BaseModel, Generic[T]):
     offset: int
     pageSize: int
     count: int
-
-
-class BrivoError(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    code: int
-    message: str

@@ -1,6 +1,7 @@
 from typing import Any
 
 import httpx
+from aiolimiter import AsyncLimiter
 
 from app.models.brivo import (
     BrivoGroup,
@@ -27,7 +28,7 @@ class BrivoRateLimitError(BrivoError):
 
 
 class BrivoClient:
-    def __init__(self, http: httpx.AsyncClient, limiter: Any = None):
+    def __init__(self, http: httpx.AsyncClient, limiter: AsyncLimiter):
         self._http = http
         self._limiter = limiter
 
@@ -44,10 +45,7 @@ class BrivoClient:
         return r
 
     async def _call(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
-        if self._limiter:
-            async with self._limiter:
-                r = await self._http.request(method, url, **kwargs)
-        else:
+        async with self._limiter:
             r = await self._http.request(method, url, **kwargs)
         return self._check(r)
 

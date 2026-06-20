@@ -11,7 +11,6 @@ from app.models.brivo import (
     BrivoGroupWrite,
     BrivoGroupRef,
     BrivoPaginatedList,
-    BrivoError,
 )
 
 NOW = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -131,12 +130,6 @@ def test_brivo_paginated_list():
 def test_brivo_paginated_list_empty():
     pl = BrivoPaginatedList[BrivoGroupRef](data=[], offset=0, pageSize=10, count=0)
     assert pl.data == []
-
-
-def test_brivo_error():
-    e = BrivoError(code=404, message="Not found")
-    assert e.code == 404
-    assert e.message == "Not found"
 
 
 def test_round_trip_user_json():
