@@ -1,9 +1,50 @@
+from datetime import datetime, timezone
+
 import pytest
 
-from app.models.brivo import BrivoGroupWrite, BrivoUserWrite
-from app.models.group import ScimGroup
+from app.models.brivo import (
+    BrivoEmail,
+    BrivoGroup,
+    BrivoGroupWrite,
+    BrivoPhoneNumber,
+    BrivoUser,
+    BrivoUserWrite,
+)
+from app.models.group import ScimGroup, ScimMember
 from app.models.user import ScimEmail, ScimName, ScimPhone, ScimUser
-from app.services.field_mapper import scim_group_to_brivo, scim_user_to_brivo
+from app.services.field_mapper import (
+    brivo_group_to_scim,
+    brivo_user_to_scim,
+    scim_group_to_brivo,
+    scim_user_to_brivo,
+)
+
+_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _brivo_user(**kwargs) -> BrivoUser:
+    defaults: dict = {
+        "id": 42,
+        "firstName": "Jane",
+        "lastName": "Smith",
+        "emails": [BrivoEmail(address="jane@example.com", type="work")],
+        "phoneNumbers": [BrivoPhoneNumber(number="+15559876543", type="work")],
+        "suspended": False,
+        "created": _NOW,
+        "updated": _NOW,
+    }
+    return BrivoUser(**(defaults | kwargs))
+
+
+def _brivo_group(**kwargs) -> BrivoGroup:
+    defaults: dict = {
+        "id": 1,
+        "name": "Engineering",
+        "keypadUnlock": False,
+        "immuneToAntipassback": False,
+        "antipassbackResetTime": 0,
+    }
+    return BrivoGroup(**(defaults | kwargs))
 
 
 def _user(**kwargs) -> ScimUser:
@@ -107,3 +148,84 @@ def test_returns_brivo_group_write():
     assert isinstance(
         scim_group_to_brivo(ScimGroup(displayName="Test")), BrivoGroupWrite
     )
+
+
+# --- Read path (Brivo → SCIM) ---
+
+
+# AC 10: user mapping
+def test_brivo_user_name_mapped():
+    result = brivo_user_to_scim(_brivo_user(), "scim-1", _NOW)
+    assert result.name.givenName == "Jane"
+    assert result.name.familyName == "Smith"
+
+
+def test_brivo_suspended_false_maps_to_active_true():
+    result = brivo_user_to_scim(_brivo_user(suspended=False), "scim-1", _NOW)
+    assert result.active is True
+
+
+def test_brivo_suspended_true_maps_to_active_false():
+    result = brivo_user_to_scim(_brivo_user(suspended=True), "scim-1", _NOW)
+    assert result.active is False
+
+
+def test_brivo_email_mapped_primary():
+    result = brivo_user_to_scim(_brivo_user(), "scim-1", _NOW)
+    assert result.emails[0].value == "jane@example.com"
+    assert result.emails[0].primary is True
+
+
+def test_brivo_phone_mapped_primary():
+    result = brivo_user_to_scim(_brivo_user(), "scim-1", _NOW)
+    assert result.phoneNumbers[0].value == "+15559876543"
+    assert result.phoneNumbers[0].primary is True
+
+
+# AC 11: empty phones → empty list
+def test_brivo_empty_phones_returns_empty_list():
+    result = brivo_user_to_scim(_brivo_user(phoneNumbers=[]), "scim-1", _NOW)
+    assert result.phoneNumbers == []
+
+
+def test_brivo_user_meta_fields():
+    result = brivo_user_to_scim(_brivo_user(), "scim-1", _NOW, location="/Users/1")
+    assert result.meta.resourceType == "User"
+    assert result.meta.created == _NOW.isoformat()
+    assert result.meta.lastModified == _NOW.isoformat()
+    assert result.meta.location == "/Users/1"
+    assert result.meta.version is not None
+
+
+# AC 12: meta.version stable
+def test_brivo_user_version_stable():
+    user = _brivo_user()
+    v1 = brivo_user_to_scim(user, "scim-1", _NOW).meta.version
+    v2 = brivo_user_to_scim(user, "scim-1", _NOW).meta.version
+    assert v1 == v2
+
+
+# AC 13: group mapping
+def test_brivo_group_display_name_mapped():
+    result = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW)
+    assert result.displayName == "Engineering"
+
+
+def test_brivo_group_members_passed_through():
+    members = [ScimMember(value="scim-1", display="Jane Smith")]
+    result = brivo_group_to_scim(_brivo_group(), "scim-g1", members, _NOW)
+    assert result.members == members
+
+
+def test_brivo_group_meta_fields():
+    result = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW)
+    assert result.meta.resourceType == "Group"
+    assert result.meta.lastModified is None
+    assert result.meta.created == _NOW.isoformat()
+    assert result.meta.version is not None
+
+
+def test_brivo_group_version_stable():
+    v1 = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW).meta.version
+    v2 = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW).meta.version
+    assert v1 == v2
