@@ -44,7 +44,7 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 
 - [x] #21 Implement `app/services/field_mapper.py` — write path (SCIM→Brivo)
 - [x] #22 Extend `app/services/field_mapper.py` — read path (Brivo→SCIM) + meta computation (timestamps from idmap `created_at` and Brivo `updated`; version hash from Brivo resource JSON)
-- [ ] #23 Extend `app/services/field_mapper.py` — member hydration: resolve Brivo `target_id` → `scim_id` via `idmap:tid` keys
+- [x] #23 Extend `app/services/field_mapper.py` — member hydration: resolve Brivo `target_id` → `scim_id` via `idmap:tid` keys
 
 ## Phase 7 — Saga Orchestrator
 

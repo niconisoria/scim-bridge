@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import fakeredis.aioredis
 import pytest
 
 from app.models.brivo import (
@@ -12,9 +13,11 @@ from app.models.brivo import (
 )
 from app.models.group import ScimGroup, ScimMember
 from app.models.user import ScimEmail, ScimName, ScimPhone, ScimUser
+from app.redis.store import RedisStore
 from app.services.field_mapper import (
     brivo_group_to_scim,
     brivo_user_to_scim,
+    hydrate_members,
     scim_group_to_brivo,
     scim_user_to_brivo,
 )
@@ -150,10 +153,6 @@ def test_returns_brivo_group_write():
     )
 
 
-# --- Read path (Brivo → SCIM) ---
-
-
-# AC 10: user mapping
 def test_brivo_user_name_mapped():
     result = brivo_user_to_scim(_brivo_user(), "scim-1", _NOW)
     assert result.name.givenName == "Jane"
@@ -182,7 +181,6 @@ def test_brivo_phone_mapped_primary():
     assert result.phoneNumbers[0].primary is True
 
 
-# AC 11: empty phones → empty list
 def test_brivo_empty_phones_returns_empty_list():
     result = brivo_user_to_scim(_brivo_user(phoneNumbers=[]), "scim-1", _NOW)
     assert result.phoneNumbers == []
@@ -197,7 +195,6 @@ def test_brivo_user_meta_fields():
     assert result.meta.version is not None
 
 
-# AC 12: meta.version stable
 def test_brivo_user_version_stable():
     user = _brivo_user()
     v1 = brivo_user_to_scim(user, "scim-1", _NOW).meta.version
@@ -205,7 +202,6 @@ def test_brivo_user_version_stable():
     assert v1 == v2
 
 
-# AC 13: group mapping
 def test_brivo_group_display_name_mapped():
     result = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW)
     assert result.displayName == "Engineering"
@@ -229,3 +225,34 @@ def test_brivo_group_version_stable():
     v1 = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW).meta.version
     v2 = brivo_group_to_scim(_brivo_group(), "scim-g1", [], _NOW).meta.version
     assert v1 == v2
+
+
+@pytest.fixture
+async def store():
+    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    return RedisStore(client)
+
+
+async def test_hydrate_members_all_found(store):
+    await store.set_idmap("user", "scim-1", "101", "ext-1")
+    await store.set_idmap("user", "scim-2", "102", "ext-2")
+    result = await hydrate_members([101, 102], store)
+    assert [m.value for m in result] == ["scim-1", "scim-2"]
+
+
+async def test_hydrate_members_some_missing(store):
+    await store.set_idmap("user", "scim-1", "101", "ext-1")
+    result = await hydrate_members([101, 999], store)
+    assert len(result) == 1
+    assert result[0].value == "scim-1"
+
+
+async def test_hydrate_members_empty_input(store):
+    result = await hydrate_members([], store)
+    assert result == []
+
+
+async def test_hydrate_members_display_none(store):
+    await store.set_idmap("user", "scim-1", "101", "ext-1")
+    result = await hydrate_members([101], store)
+    assert result[0].display is None

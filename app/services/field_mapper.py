@@ -13,6 +13,7 @@ from app.models.brivo import (
 from app.models.common import ScimMeta
 from app.models.group import ScimGroup, ScimGroupResponse, ScimMember
 from app.models.user import ScimEmail, ScimName, ScimPhone, ScimUser, ScimUserResponse
+from app.redis.store import RedisStore
 
 
 def scim_user_to_brivo(user: ScimUser) -> BrivoUserWrite:
@@ -79,6 +80,15 @@ def brivo_user_to_scim(
             version=_version_hash(user),
         ),
     )
+
+
+async def hydrate_members(target_ids: list[int], store: RedisStore) -> list[ScimMember]:
+    members = []
+    for tid in target_ids:
+        record = await store.get_by_target("user", str(tid))
+        if record:
+            members.append(ScimMember(value=record["scim_id"]))
+    return members
 
 
 def brivo_group_to_scim(
