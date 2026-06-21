@@ -13,6 +13,12 @@ class ScimConflict(Exception):
         super().__init__(detail)
 
 
+class ScimNotFound(Exception):
+    def __init__(self, detail: str = "Resource not found") -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
 _SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 _SCIM_CONTENT_TYPE = "application/scim+json; charset=UTF-8"
 
