@@ -33,7 +33,7 @@ async def run_saga(steps: list[Step]) -> None:
         except Exception:
             log.error("step.failed", step=step.name)
             log.info("saga.compensating")
-            for s in reversed(completed):
+            for s in reversed([*completed, step]):
                 if s.rollback:
                     try:
                         await s.rollback()

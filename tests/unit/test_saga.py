@@ -101,6 +101,22 @@ async def test_rollback_error_continues_remaining():
 
 
 @pytest.mark.asyncio
+async def test_failed_step_rollback_is_called():
+    rollbacks = []
+
+    async def rb():
+        rollbacks.append("rb")
+
+    async def fail():
+        raise ValueError("boom")
+
+    with pytest.raises(SagaError):
+        await run_saga([Step("s1", fail, rb)])
+
+    assert rollbacks == ["rb"]
+
+
+@pytest.mark.asyncio
 async def test_saga_error_carries_saga_id_and_step_name():
     async def fail():
         raise ValueError("boom")

@@ -49,7 +49,7 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 ## Phase 7 — Saga Orchestrator
 
 - [x] #24 Implement `app/services/saga.py` — base saga runner (state machine, rollback); all following saga tasks depend on this
-- [ ] #25 Implement Create User saga — step 0: SETNX lock (409 on conflict); step 1: POST to Brivo; step 2: write idmap keys (no TTL), DEL lock
+- [x] #25 Implement Create User saga — step 0: SETNX lock (409 on conflict); step 1: POST to Brivo; step 2: write idmap keys (no TTL), DEL lock
 - [ ] #26 Implement Delete User saga — `GET /users/{id}/groups`, remove from each group, DELETE from Brivo, DEL idmap + cache keys
 - [ ] #27 Implement Create Group saga — step 0: SETNX lock; step 1: POST to Brivo; step 2: write idmap; step 3: bulk add members (resolve scim→target via idmap upfront)
 - [ ] #28 Implement Delete Group saga
