@@ -23,10 +23,13 @@ Saga state is in-memory. Bridge crash = in-progress saga is lost. The idempotenc
 
 ### Create User
 
+`external_id = externalId or userName` — SCIM spec makes `externalId` optional; `userName` is the fallback.
+
 | Step | Forward | Rollback |
 |---|---|---|
-| 0 | Generate `scim_id` (UUID v4). `SET NX EX 300 lock:brivo:create:user:{external_id}` — if key exists → `409`. | DEL lock key |
-| 1 | `POST /target/users` → save `target_id` to saga state | `DELETE /target/users/{target_id}` |
+| pre | `GET idmap:brivo:ext:user:{external_id}` — if exists → `409` (completed creation, duplicate). | — |
+| 0 | Generate `scim_id` (UUID v4). `SET NX EX 300 lock:brivo:create:user:{external_id}` — if key exists → `409` (concurrent in-flight). | DEL lock key |
+| 1 | `POST /target/users` → save `target_id` to saga state | `DELETE /target/users/{target_id}` + DEL lock key |
 | 2 | Write `idmap:brivo:scim:user:{scim_id}` and `idmap:brivo:ext:user:{external_id}` (permanent, no TTL). DEL lock key. | DEL both idmap keys |
 
 ### Delete User

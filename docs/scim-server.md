@@ -237,7 +237,7 @@ Unrecognized path format → `400` with `scimType: "invalidPath"`.
 | `400` | Invalid request body, unrecognized PATCH path, `displayName` > 35 chars — detail: `"Group displayName exceeds Brivo's 35-character limit"` |
 | `401` | Missing / invalid token |
 | `404` | Resource not found |
-| `409` | Conflict — `externalId` already provisioned (`scimType: "uniqueness"`) |
+| `409` | Conflict — user already exists (idmap check) or creation in progress (lock held); `scimType: "uniqueness"` |
 | `429` | Rate limited — only propagated after all tenacity retries exhausted |
 | `500` | Internal / saga failure |
 

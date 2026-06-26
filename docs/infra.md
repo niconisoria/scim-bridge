@@ -28,10 +28,12 @@ redis:
 
 ### mock-brivo healthcheck
 
+`curl` not present in `python:3.14-slim`. Uses Python stdlib instead:
+
 ```yaml
 mock-brivo:
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
     interval: 5s
     timeout: 3s
     retries: 5
