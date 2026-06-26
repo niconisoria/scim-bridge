@@ -56,7 +56,7 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 - [x] #29 Implement Add Member(s) saga (PATCH `add`) — resolve all scim→target IDs from idmap upfront (400 if any missing), PUT each to Brivo, invalidate member cache
 - [x] #30 Implement Remove Member saga (PATCH `remove`)
 - [x] #31 Implement Update Group saga (PUT) — fetch current members from Brivo (cache), resolve new members from idmap, add new (PUT to Brivo), remove stale (DELETE from Brivo), invalidate cache
-- [ ] #32 Implement Update User read-modify-write (no saga) — fetch from Brivo (cache), merge PUT/PATCH replace fields, PUT to Brivo (tenacity), invalidate cache, return Brivo→SCIM mapped response
+- [x] #32 Implement Update User read-modify-write (no saga) — fetch from Brivo (cache), merge PUT/PATCH replace fields, PUT to Brivo (tenacity), invalidate cache, return Brivo→SCIM mapped response
 
 ## Phase 8 — SCIM Routers
 
