@@ -20,7 +20,7 @@ services:
       BRIVO_LATENCY_MS: ${BRIVO_LATENCY_MS:-300}
       BRIVO_RATE_LIMIT: ${BRIVO_RATE_LIMIT:-20}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 5s
       timeout: 3s
       retries: 5
