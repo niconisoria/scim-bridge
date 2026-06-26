@@ -33,10 +33,16 @@ def _brivo_user() -> BrivoUser:
     )
 
 
+def _fresh_store() -> AsyncMock:
+    store = AsyncMock()
+    store.get_by_external.return_value = None
+    store.acquire_lock.return_value = True
+    return store
+
+
 @pytest.mark.asyncio
 async def test_no_external_id_falls_back_to_username():
-    store = AsyncMock()
-    store.acquire_lock.return_value = True
+    store = _fresh_store()
     client = AsyncMock()
     client.create_user.return_value = _brivo_user()
 
@@ -49,18 +55,31 @@ async def test_no_external_id_falls_back_to_username():
 
 
 @pytest.mark.asyncio
+async def test_duplicate_user_raises_conflict():
+    store = AsyncMock()
+    store.get_by_external.return_value = {"scim_id": "existing", "target_id": "1"}
+    client = MagicMock()
+
+    with pytest.raises(ScimConflict):
+        await create_user(_body(), store, client)
+
+    store.acquire_lock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_lock_conflict_raises_scim_conflict():
     store = AsyncMock()
+    store.get_by_external.return_value = None
     store.acquire_lock.return_value = False
     client = MagicMock()
+
     with pytest.raises(ScimConflict):
         await create_user(_body(), store, client)
 
 
 @pytest.mark.asyncio
 async def test_happy_path_returns_brivo_user_and_scim_id():
-    store = AsyncMock()
-    store.acquire_lock.return_value = True
+    store = _fresh_store()
     client = AsyncMock()
     client.create_user.return_value = _brivo_user()
 
@@ -74,8 +93,7 @@ async def test_happy_path_returns_brivo_user_and_scim_id():
 
 @pytest.mark.asyncio
 async def test_brivo_create_fails_releases_lock():
-    store = AsyncMock()
-    store.acquire_lock.return_value = True
+    store = _fresh_store()
     client = AsyncMock()
     client.create_user.side_effect = RuntimeError("brivo down")
 
@@ -87,8 +105,7 @@ async def test_brivo_create_fails_releases_lock():
 
 @pytest.mark.asyncio
 async def test_idmap_write_fails_deletes_brivo_user_and_releases_lock():
-    store = AsyncMock()
-    store.acquire_lock.return_value = True
+    store = _fresh_store()
     store.set_idmap.side_effect = RuntimeError("redis down")
     client = AsyncMock()
     client.create_user.return_value = _brivo_user()

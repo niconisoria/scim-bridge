@@ -18,6 +18,9 @@ async def create_user(
     scim_id = str(uuid4())
     brivo_write = scim_user_to_brivo(body)
 
+    if await store.get_by_external("user", external_id):
+        raise ScimConflict("User already exists")
+
     if not await store.acquire_lock("user", external_id, scim_id):
         raise ScimConflict("User creation already in progress for this externalId")
 
