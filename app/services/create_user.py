@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from app.brivo.client import BrivoClient, BrivoNotFoundError
 from app.brivo.client import BrivoUser
-from app.core.errors import ScimBadRequest, ScimConflict
+from app.core.errors import ScimConflict
 from app.models.user import ScimUser
 from app.redis.store import RedisStore
 from app.services.field_mapper import scim_user_to_brivo
@@ -14,13 +14,11 @@ async def create_user(
     store: RedisStore,
     client: BrivoClient,
 ) -> tuple[BrivoUser, str]:
-    if not body.externalId:
-        raise ScimBadRequest("externalId is required")
-
+    external_id = body.externalId or body.userName
     scim_id = str(uuid4())
     brivo_write = scim_user_to_brivo(body)
 
-    if not await store.acquire_lock("user", body.externalId, scim_id):
+    if not await store.acquire_lock("user", external_id, scim_id):
         raise ScimConflict("User creation already in progress for this externalId")
 
     result: dict = {}
@@ -34,17 +32,15 @@ async def create_user(
                 await client.delete_user(result["user"].id)
             except BrivoNotFoundError:
                 pass
-        await store.release_lock("user", body.externalId)
+        await store.release_lock("user", external_id)
 
     async def step_idmap_forward() -> None:
-        await store.set_idmap("user", scim_id, str(result["user"].id), body.externalId)
-        await store.release_lock("user", body.externalId)
+        await store.set_idmap("user", scim_id, str(result["user"].id), external_id)
+        await store.release_lock("user", external_id)
 
     async def step_idmap_rollback() -> None:
         if "user" in result:
-            await store.del_idmap(
-                "user", scim_id, str(result["user"].id), body.externalId
-            )
+            await store.del_idmap("user", scim_id, str(result["user"].id), external_id)
 
     await run_saga(
         [

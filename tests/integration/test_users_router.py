@@ -111,15 +111,18 @@ async def test_post_user_conflict(ac, store):
     assert SCIM_ERROR_SCHEMA in r.json()["schemas"]
 
 
-async def test_post_user_missing_external_id(ac):
+async def test_post_user_no_external_id_uses_username(ac, brivo_mock):
+    brivo_mock.post(f"{BRIVO}/v1/api/users").mock(
+        return_value=httpx.Response(201, json=_user_json())
+    )
     body = {
         "userName": "jane@example.com",
         "emails": [{"value": "jane@example.com", "primary": True}],
     }
     r = await ac.post("/scim/v2/Users", json=body, headers=AUTH)
 
-    assert r.status_code == 400
-    assert SCIM_ERROR_SCHEMA in r.json()["schemas"]
+    assert r.status_code == 201
+    assert r.json()["userName"] == "jane@example.com"
 
 
 # --- GET /scim/v2/Users/{id} ---

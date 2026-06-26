@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.core.errors import ScimBadRequest, ScimConflict
+from app.core.errors import ScimConflict
 from app.models.brivo import BrivoUser
 from app.models.user import ScimEmail, ScimName, ScimUser
 from app.services.create_user import create_user
@@ -34,11 +34,18 @@ def _brivo_user() -> BrivoUser:
 
 
 @pytest.mark.asyncio
-async def test_missing_external_id_raises_bad_request():
-    store = MagicMock()
-    client = MagicMock()
-    with pytest.raises(ScimBadRequest):
-        await create_user(_body(externalId=None), store, client)
+async def test_no_external_id_falls_back_to_username():
+    store = AsyncMock()
+    store.acquire_lock.return_value = True
+    client = AsyncMock()
+    client.create_user.return_value = _brivo_user()
+
+    brivo_user, scim_id = await create_user(_body(externalId=None), store, client)
+
+    assert brivo_user.id == 42
+    store.acquire_lock.assert_called_once_with("user", "jane@example.com", scim_id)
+    store.set_idmap.assert_called_once_with("user", scim_id, "42", "jane@example.com")
+    store.release_lock.assert_called_once_with("user", "jane@example.com")
 
 
 @pytest.mark.asyncio
