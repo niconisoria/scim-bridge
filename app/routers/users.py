@@ -1,0 +1,171 @@
+import re
+from datetime import datetime, timezone
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import JSONResponse
+
+from app.brivo.client import BrivoClient
+from app.brivo.dependencies import get_client
+from app.core.errors import ScimNotFound
+from app.models.brivo import BrivoUser
+from app.models.common import ListResponse, PatchRequest
+from app.models.user import ScimUser, ScimUserResponse
+from app.redis.store import RedisStore, get_store
+from app.services.create_user import create_user
+from app.services.delete_user import delete_user
+from app.services.field_mapper import brivo_user_to_scim
+from app.services.update_user import update_user
+
+router = APIRouter(prefix="/scim/v2/Users", tags=["users"])
+
+Store = Annotated[RedisStore, Depends(get_store)]
+Client = Annotated[BrivoClient, Depends(get_client)]
+
+_FILTER_RE = re.compile(r'userName\s+eq\s+"([^"]*)"', re.IGNORECASE)
+
+
+@router.post("", status_code=201)
+async def post_user(
+    body: ScimUser, store: Store, client: Client, response: Response
+) -> ScimUserResponse:
+    brivo_user, scim_id = await create_user(body, store, client)
+    idmap = await store.get_by_scim("user", scim_id)
+    created_at = datetime.fromisoformat(idmap["created_at"])
+    location = f"/scim/v2/Users/{scim_id}"
+    response.headers["Location"] = location
+    return brivo_user_to_scim(brivo_user, scim_id, created_at, location)
+
+
+@router.get("")
+async def list_users(
+    store: Store,
+    client: Client,
+    startIndex: int = Query(default=1, ge=1),
+    count: int = Query(default=100, ge=0),
+    filter: str | None = Query(default=None),
+) -> JSONResponse:
+    if filter:
+        resources = await _apply_filter(filter, store, client)
+        total = len(resources)
+    else:
+        page = await client.list_users(offset=startIndex - 1, page_size=count)
+        resources = []
+        for bu in page.data:
+            idmap = await store.get_by_target("user", str(bu.id))
+            if not idmap:
+                continue
+            scim_id = idmap["scim_id"]
+            rec = await store.get_by_scim("user", scim_id)
+            created_at = (
+                datetime.fromisoformat(rec["created_at"])
+                if rec
+                else datetime.now(timezone.utc)
+            )
+            location = f"/scim/v2/Users/{scim_id}"
+            resources.append(brivo_user_to_scim(bu, scim_id, created_at, location))
+        total = page.count
+
+    resp = ListResponse[ScimUserResponse](
+        totalResults=total,
+        startIndex=startIndex,
+        itemsPerPage=len(resources),
+        Resources=resources,
+    )
+    return JSONResponse(content=resp.model_dump(mode="json"))
+
+
+@router.get("/{scim_id}")
+async def get_user(scim_id: str, store: Store, client: Client) -> ScimUserResponse:
+    idmap = await store.get_by_scim("user", scim_id)
+    if not idmap:
+        raise ScimNotFound(f"User {scim_id!r} not found")
+    target_id = idmap["target_id"]
+    created_at = datetime.fromisoformat(idmap["created_at"])
+
+    cached = await store.cache_get("user", target_id)
+    if cached:
+        brivo_user = BrivoUser.model_validate(cached)
+    else:
+        brivo_user = await client.get_user(int(target_id))
+        await store.cache_set(
+            "user", target_id, value=brivo_user.model_dump(mode="json")
+        )
+
+    location = f"/scim/v2/Users/{scim_id}"
+    return brivo_user_to_scim(brivo_user, scim_id, created_at, location)
+
+
+@router.put("/{scim_id}")
+async def put_user(
+    scim_id: str, body: ScimUser, store: Store, client: Client
+) -> ScimUserResponse:
+    idmap = await store.get_by_scim("user", scim_id)
+    if not idmap:
+        raise ScimNotFound(f"User {scim_id!r} not found")
+    target_id = int(idmap["target_id"])
+    created_at = datetime.fromisoformat(idmap["created_at"])
+    brivo_user = await update_user(
+        target_id, body=body, patch_ops=None, store=store, client=client
+    )
+    location = f"/scim/v2/Users/{scim_id}"
+    return brivo_user_to_scim(brivo_user, scim_id, created_at, location)
+
+
+@router.patch("/{scim_id}")
+async def patch_user(
+    scim_id: str, body: PatchRequest, store: Store, client: Client
+) -> ScimUserResponse:
+    idmap = await store.get_by_scim("user", scim_id)
+    if not idmap:
+        raise ScimNotFound(f"User {scim_id!r} not found")
+    target_id = int(idmap["target_id"])
+    created_at = datetime.fromisoformat(idmap["created_at"])
+    brivo_user = await update_user(
+        target_id, body=None, patch_ops=body.Operations, store=store, client=client
+    )
+    location = f"/scim/v2/Users/{scim_id}"
+    return brivo_user_to_scim(brivo_user, scim_id, created_at, location)
+
+
+@router.delete("/{scim_id}", status_code=204)
+async def delete_user_endpoint(scim_id: str, store: Store, client: Client) -> Response:
+    await delete_user(scim_id, store, client)
+    return Response(status_code=204)
+
+
+async def _apply_filter(
+    filter_str: str, store: RedisStore, client: BrivoClient
+) -> list[ScimUserResponse]:
+    m = _FILTER_RE.match(filter_str.strip())
+    if not m:
+        return []
+    username = m.group(1).lower()
+
+    all_users: list[BrivoUser] = []
+    offset = 0
+    page_size = 100
+    while True:
+        page = await client.list_users(offset=offset, page_size=page_size)
+        all_users.extend(page.data)
+        if offset + page_size >= page.count:
+            break
+        offset += page_size
+
+    results: list[ScimUserResponse] = []
+    for bu in all_users:
+        if not bu.emails or bu.emails[0].address.lower() != username:
+            continue
+        idmap = await store.get_by_target("user", str(bu.id))
+        if not idmap:
+            continue
+        scim_id = idmap["scim_id"]
+        rec = await store.get_by_scim("user", scim_id)
+        created_at = (
+            datetime.fromisoformat(rec["created_at"])
+            if rec
+            else datetime.now(timezone.utc)
+        )
+        location = f"/scim/v2/Users/{scim_id}"
+        results.append(brivo_user_to_scim(bu, scim_id, created_at, location))
+    return results
