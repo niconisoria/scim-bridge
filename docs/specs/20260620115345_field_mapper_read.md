@@ -26,7 +26,7 @@ Related: [Field Mapper Write Path](20260620114246_field_mapper_write.md)
 
 ## Story
 
-As saga/router, want pure Brivo→SCIM field translation with meta computation, so responses to Okta are correctly shaped without mapping logic in callers.
+As bridge, want pure Brivo→SCIM field translation with meta computation, so responses to Okta are correctly shaped without mapping logic in callers.
 
 AC:
 1. `brivo_user_to_scim(user: BrivoUser, scim_id: str, created_at: datetime, location: str | None = None) -> ScimUserResponse` exists and is importable from `app.services.field_mapper`

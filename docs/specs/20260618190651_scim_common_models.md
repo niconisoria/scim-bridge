@@ -14,7 +14,7 @@ Related: [SCIM User Models](20260618133057_scim_user_models.md), [SCIM Group Mod
 
 ## Story
 
-As the bridge, I want shared SCIM schemas in one module so user and group models can import without circular deps.
+As bridge, want shared SCIM schemas in one module so user and group models can import without circular deps.
 
 AC:
 1. `ScimMeta` moved from `user.py` to `common.py`; `user.py` and `group.py` import it from `common.py`

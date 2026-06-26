@@ -20,7 +20,7 @@ Related: [Field Mapper Read Path](20260620115345_field_mapper_read.md) [Field Ma
 
 ## Story
 
-As saga/router, want to resolve Brivo group member target_ids to ScimMembers in one call, so group read responses include correct SCIM member IDs without idmap logic in callers.
+As bridge, want to resolve Brivo group member target_ids to ScimMembers in one call, so group read responses include correct SCIM member IDs without idmap logic in callers.
 
 AC:
 1. `hydrate_members(target_ids: list[int], store: RedisStore) -> list[ScimMember]` is async and importable from `app.services.field_mapper`

@@ -14,7 +14,7 @@ Related: [SCIM User Models](20260618133057_scim_user_models.md)
 
 ## Story
 
-As the SCIM bridge, want typed Pydantic models for Group resources, so routers can parse Okta requests and serialize Brivo responses without ad-hoc dicts.
+As bridge, want typed Pydantic models for Group resources, so routers can parse Okta requests and serialize Brivo responses without ad-hoc dicts.
 
 AC:
 1. `ScimGroup` parses Okta POST/PUT body; unknown fields silently dropped

@@ -21,7 +21,7 @@ Related: [Brivo Client](20260620003030_brivo_client.md) [SCIM User Models](20260
 
 ## Story
 
-As saga/router, want pure SCIM→Brivo field translation, so Brivo calls get correctly shaped payloads without mapping logic scattered across callers.
+As bridge, want pure SCIM→Brivo field translation, so Brivo calls get correctly shaped payloads without mapping logic scattered across callers.
 
 AC:
 1. `scim_user_to_brivo(user: ScimUser) -> BrivoUserWrite` — maps `name.givenName→firstName`, `name.familyName→lastName`, `active→suspended` (inverted)
