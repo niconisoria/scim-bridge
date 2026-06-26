@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     brivo_rate_limit: int = 20
     scim_base_url: str = "http://localhost:8000"
 
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()

@@ -61,3 +61,5 @@ app:
 | `SCIM_BASE_URL` | app | Base URL for `meta.location` (e.g. `http://localhost:8000`) |
 
 All vars in `.env` (not committed). Template at `.env.example`.
+
+`app` Settings uses `extra="ignore"` — mock-brivo-only vars (`BRIVO_ERROR_RATE`, `BRIVO_LATENCY_MS`) in a shared `.env` are silently ignored and do not cause a startup error.
