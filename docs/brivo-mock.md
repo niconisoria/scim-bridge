@@ -106,6 +106,17 @@ Used by the bridge's Delete User saga to fetch group memberships before removal.
 { "count": 2, "data": [{ "id": 99, "name": "Engineering" }] }
 ```
 
+## Seed Data
+
+On startup, one user is pre-inserted into the in-memory store for local dev convenience:
+
+```json
+{ "id": 1, "externalId": "seed-user-1", "firstName": "Seed", "lastName": "User",
+  "emails": [{ "address": "seed@example.com", "type": "work" }] }
+```
+
+The counter starts at 1, so the next created user gets id=2. The seed is reset on every restart.
+
 ## Behavior Simulation
 
 | Behavior | Default | Env var |

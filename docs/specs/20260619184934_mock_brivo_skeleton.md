@@ -26,7 +26,7 @@ As bridge developer, want runnable mock Brivo skeleton, so integration tests hav
 AC:
 1. `GET /health` returns `{"status": "ok"}` with 200
 2. Service starts on port 8001 via `Dockerfile.brivo` / `docker-compose up`
-3. In-memory store initialized at startup: `users: dict[int, BrivoUser]`, `groups: dict[int, BrivoGroup]`
+3. In-memory store initialized at startup: `users: dict[int, BrivoUser]`, `groups: dict[int, BrivoGroup]`; one seed user inserted (id=1, externalId="seed-user-1", seed@example.com) for local dev
 4. Inline Pydantic models defined: `BrivoUser`, `BrivoGroup`, `BrivoEmail`, `BrivoPhone`, `BrivoError`, `BrivoPage`
 5. Auth middleware: requests without `api-key` header return `403 {"code": 403, "message": "Forbidden"}`
 6. `GET /health` is exempt from auth check
@@ -53,6 +53,14 @@ Store (module-level, initialized at startup):
 users: dict[int, BrivoUser] = {}
 groups: dict[int, BrivoGroup] = {}
 _counters: dict[str, int] = {"users": 0, "groups": 0}
+```
+
+Seed user inserted in lifespan after reset (id=1):
+```
+externalId: "seed-user-1"
+firstName:  "Seed"
+lastName:   "User"
+emails:     [{ address: "seed@example.com", type: "work" }]
 ```
 
 Inline models (no imports from `app/`):

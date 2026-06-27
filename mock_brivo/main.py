@@ -100,6 +100,17 @@ async def lifespan(app: FastAPI):
     _request_times.clear()
     _counters["users"] = 0
     _counters["groups"] = 0
+    now = datetime.now(timezone.utc)
+    seed = BrivoUser(
+        id=next_id("users"),
+        externalId="seed-user-1",
+        firstName="Seed",
+        lastName="User",
+        emails=[BrivoEmail(address="seed@example.com")],
+        created=now,
+        updated=now,
+    )
+    users[seed.id] = seed
     yield
 
 
