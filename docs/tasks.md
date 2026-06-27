@@ -62,5 +62,5 @@ Mock is a standalone FastAPI app (`Dockerfile.brivo`) with its own inline Pydant
 
 - [x] #33 Implement `app/routers/users.py` — all 6 user endpoints
 - [x] #34 Implement `app/routers/groups.py` — all 6 group endpoints; PATCH `replace` group attributes handled inline (no saga): PUT to Brivo + invalidate cache, tenacity retries
-- [ ] #35 Implement `app/routers/discovery.py` — unauthenticated discovery endpoints
+- [x] #35 Implement `app/routers/discovery.py` — unauthenticated discovery endpoints
 - [ ] #36 Implement `main.py` — app assembly, middleware, lifespan
