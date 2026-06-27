@@ -2,12 +2,14 @@ from fastapi import FastAPI, Request
 
 from app.core.auth import BearerTokenMiddleware
 from app.core.errors import ScimBadRequest, ScimConflict, ScimNotFound, scim_error
+from app.routers.groups import router as groups_router
 from app.routers.users import router as users_router
 from app.services.saga import SagaError
 
 app = FastAPI()
 app.add_middleware(BearerTokenMiddleware)
 app.include_router(users_router)
+app.include_router(groups_router)
 
 
 @app.exception_handler(ScimNotFound)
