@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 
-from app.brivo.client import BrivoClient
+from app.brivo.client import BrivoClient, BrivoError
 from app.brivo.rate_limiter import make_limiter
 from app.core.auth import BearerTokenMiddleware
 from app.core.config import settings
@@ -57,3 +57,8 @@ async def _conflict(request: Request, exc: ScimConflict):
 @app.exception_handler(SagaError)
 async def _saga_error(request: Request, exc: SagaError):
     return scim_error(500, str(exc))
+
+
+@app.exception_handler(BrivoError)
+async def _brivo_error(request: Request, exc: BrivoError):
+    return scim_error(502, str(exc))

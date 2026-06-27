@@ -19,13 +19,12 @@ def configure_logging() -> None:
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        response = await call_next(request)
-        get_logger().info(
-            "http.request",
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
-        )
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            get_logger().error("http.error", method=request.method, path=request.url.path, error=str(exc))
+            raise
+        get_logger().info("http.request", method=request.method, path=request.url.path, status=response.status_code)
         return response
 
 

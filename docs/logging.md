@@ -12,6 +12,12 @@ Uvicorn access logs are suppressed (`--no-access-log`). Instead, `RequestLogging
 
 `configure_logging()` is called inside the FastAPI `lifespan` context manager, before any requests are served. Mock Brivo uses the same pattern with `_configure_logging()` and `_RequestLoggingMiddleware` (excludes `/health`).
 
+If `call_next` raises (unhandled exception escaping route + exception handlers), middleware logs `http.error` with `error` field and re-raises:
+
+```json
+{"event": "http.error", "method": "GET", "path": "/scim/v2/Users/123", "error": "503: Simulated error", "level": "error", "timestamp": "..."}
+```
+
 ## correlation_id Propagation
 
 `correlation_id` is a UUID v4 generated per incoming SCIM request by the auth middleware. It propagates through all downstream calls via `structlog.contextvars`:
