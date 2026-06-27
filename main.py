@@ -1,13 +1,33 @@
+from contextlib import asynccontextmanager
+
+import httpx
 from fastapi import FastAPI, Request
 
+from app.brivo.client import BrivoClient
+from app.brivo.rate_limiter import make_limiter
 from app.core.auth import BearerTokenMiddleware
+from app.core.config import settings
 from app.core.errors import ScimBadRequest, ScimConflict, ScimNotFound, scim_error
+from app.redis.store import get_redis
 from app.routers.discovery import router as discovery_router
 from app.routers.groups import router as groups_router
 from app.routers.users import router as users_router
 from app.services.saga import SagaError
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    http = httpx.AsyncClient(
+        base_url=settings.brivo_base_url,
+        headers={"api-key": "dev"},
+    )
+    app.state.brivo_client = BrivoClient(http, make_limiter(settings.brivo_rate_limit))
+    yield
+    await http.aclose()
+    await get_redis().aclose()
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(BearerTokenMiddleware)
 app.include_router(discovery_router)
 app.include_router(users_router)
