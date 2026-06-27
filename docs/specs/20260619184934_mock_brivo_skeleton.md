@@ -32,6 +32,8 @@ AC:
 6. `GET /health` is exempt from auth check
 7. Auto-increment ID counter per resource type (users, groups) seeded at startup
 8. `curl http://localhost:8001/health` returns 200 without api-key header
+9. All API requests logged via structlog JSON (`http.request` event); `/health` excluded from logs
+10. Uvicorn access logs suppressed (`--no-access-log`); structlog is the only log sink
 
 ## Design
 

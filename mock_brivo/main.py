@@ -1,6 +1,5 @@
 import asyncio
 import collections
-import logging
 import os
 import random
 import time
@@ -8,17 +7,42 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Generic, TypeVar
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 
-class _NoHealthFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "/health" not in record.getMessage()
+def _configure_logging() -> None:
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(20),
+        logger_factory=structlog.PrintLoggerFactory(),
+    )
 
 
-logging.getLogger("uvicorn.access").addFilter(_NoHealthFilter())
+_log = structlog.get_logger()
+
+
+class _RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        if request.url.path != "/health":
+            _log.info(
+                "http.request",
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+            )
+        return response
+
 
 # --- Inline models (no app/ imports) ---
 
@@ -103,6 +127,7 @@ def next_id(resource: str) -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_logging()
     users.clear()
     groups.clear()
     group_members.clear()
@@ -124,6 +149,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(_RequestLoggingMiddleware)
 
 
 # --- Auth middleware ---

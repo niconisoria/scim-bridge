@@ -7,6 +7,7 @@ from app.brivo.client import BrivoClient
 from app.brivo.rate_limiter import make_limiter
 from app.core.auth import BearerTokenMiddleware
 from app.core.config import settings
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.core.errors import ScimBadRequest, ScimConflict, ScimNotFound, scim_error
 from app.redis.store import get_redis
 from app.routers.discovery import router as discovery_router
@@ -17,6 +18,7 @@ from app.services.saga import SagaError
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     http = httpx.AsyncClient(
         base_url=settings.brivo_base_url,
         headers={"api-key": "dev"},
@@ -28,6 +30,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(BearerTokenMiddleware)
 app.include_router(discovery_router)
 app.include_router(users_router)

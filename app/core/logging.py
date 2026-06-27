@@ -1,4 +1,7 @@
 import structlog
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 
 def configure_logging() -> None:
@@ -12,6 +15,18 @@ def configure_logging() -> None:
         wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
         logger_factory=structlog.PrintLoggerFactory(),
     )
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        get_logger().info(
+            "http.request",
+            method=request.method,
+            path=request.url.path,
+            status=response.status_code,
+        )
+        return response
 
 
 get_logger = structlog.get_logger
