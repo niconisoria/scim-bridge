@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import logging
 import os
 import random
 import time
@@ -10,6 +11,14 @@ from typing import Generic, TypeVar
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+
+class _NoHealthFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_NoHealthFilter())
 
 # --- Inline models (no app/ imports) ---
 
