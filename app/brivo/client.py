@@ -28,6 +28,18 @@ class BrivoRateLimitError(BrivoError):
     pass
 
 
+async def paginate_all(list_fn, page_size: int = 100) -> list:
+    items: list = []
+    offset = 0
+    while True:
+        page = await list_fn(offset=offset, page_size=page_size)
+        items.extend(page.data)
+        if offset + page_size >= page.count:
+            break
+        offset += page_size
+    return items
+
+
 brivo_retry = retry(
     retry=retry_if_exception_type(BrivoRateLimitError),
     wait=wait_fixed(1),

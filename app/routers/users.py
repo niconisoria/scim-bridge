@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 
-from app.brivo.client import BrivoClient
+from app.brivo.client import BrivoClient, paginate_all
 from app.brivo.dependencies import get_client
 from app.core.errors import ScimNotFound
 from app.models.brivo import BrivoUser
@@ -142,15 +142,7 @@ async def _apply_filter(
         return []
     username = m.group(1).lower()
 
-    all_users: list[BrivoUser] = []
-    offset = 0
-    page_size = 100
-    while True:
-        page = await client.list_users(offset=offset, page_size=page_size)
-        all_users.extend(page.data)
-        if offset + page_size >= page.count:
-            break
-        offset += page_size
+    all_users: list[BrivoUser] = await paginate_all(client.list_users)
 
     results: list[ScimUserResponse] = []
     for bu in all_users:
