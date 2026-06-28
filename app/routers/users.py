@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from app.brivo.client import BrivoClient, paginate_all
@@ -11,7 +11,7 @@ from app.models.common import ListResponse, PatchRequest
 from app.models.user import ScimUser, ScimUserResponse
 from app.brivo.fetch import fetch_user
 from app.redis.store import RedisStore, get_store
-from app.routers._helpers import resolve_or_404
+from app.routers._helpers import Params, resolve_or_404
 from app.services.create_user import create_user
 from app.services.delete_user import delete_user
 from app.services.field_mapper import brivo_user_to_scim
@@ -38,37 +38,21 @@ async def post_user(
 
 
 @router.get("")
-async def list_users(
-    store: Store,
-    client: Client,
-    startIndex: int = Query(default=1, ge=1),
-    count: int = Query(default=100, ge=0),
-    filter: str | None = Query(default=None),
-) -> JSONResponse:
-    if filter:
-        resources = await _apply_filter(filter, store, client)
+async def list_users(params: Params, store: Store, client: Client) -> JSONResponse:
+    if params.filter:
+        resources = await _apply_filter(params.filter, store, client)
         total = len(resources)
     else:
-        page = await client.list_users(offset=startIndex - 1, page_size=count)
+        page = await client.list_users(offset=params.startIndex - 1, page_size=params.count)
         resources = []
         for bu in page.data:
-            idmap = await store.get_by_target("user", str(bu.id))
-            if not idmap:
-                continue
-            scim_id = idmap["scim_id"]
-            rec = await store.get_by_scim("user", scim_id)
-            created_at = (
-                datetime.fromisoformat(rec["created_at"])
-                if rec
-                else datetime.now(timezone.utc)
-            )
-            location = f"/scim/v2/Users/{scim_id}"
-            resources.append(brivo_user_to_scim(bu, scim_id, created_at, location))
+            if r := await _user_to_scim_response(bu, store):
+                resources.append(r)
         total = page.count
 
     resp = ListResponse[ScimUserResponse](
         totalResults=total,
-        startIndex=startIndex,
+        startIndex=params.startIndex,
         itemsPerPage=len(resources),
         Resources=resources,
     )
@@ -116,6 +100,16 @@ async def delete_user_endpoint(scim_id: str, store: Store, client: Client) -> Re
     return Response(status_code=204)
 
 
+async def _user_to_scim_response(bu, store: RedisStore) -> ScimUserResponse | None:
+    idmap = await store.get_by_target("user", str(bu.id))
+    if not idmap:
+        return None
+    scim_id = idmap["scim_id"]
+    rec = await store.get_by_scim("user", scim_id)
+    created_at = datetime.fromisoformat(rec["created_at"]) if rec else datetime.now(timezone.utc)
+    return brivo_user_to_scim(bu, scim_id, created_at, f"/scim/v2/Users/{scim_id}")
+
+
 async def _apply_filter(
     filter_str: str, store: RedisStore, client: BrivoClient
 ) -> list[ScimUserResponse]:
@@ -123,23 +117,10 @@ async def _apply_filter(
     if not m:
         return []
     username = m.group(1).lower()
-
-    all_users = await paginate_all(client.list_users)
-
-    results: list[ScimUserResponse] = []
-    for bu in all_users:
+    results = []
+    for bu in await paginate_all(client.list_users):
         if not bu.emails or bu.emails[0].address.lower() != username:
             continue
-        idmap = await store.get_by_target("user", str(bu.id))
-        if not idmap:
-            continue
-        scim_id = idmap["scim_id"]
-        rec = await store.get_by_scim("user", scim_id)
-        created_at = (
-            datetime.fromisoformat(rec["created_at"])
-            if rec
-            else datetime.now(timezone.utc)
-        )
-        location = f"/scim/v2/Users/{scim_id}"
-        results.append(brivo_user_to_scim(bu, scim_id, created_at, location))
+        if r := await _user_to_scim_response(bu, store):
+            results.append(r)
     return results
