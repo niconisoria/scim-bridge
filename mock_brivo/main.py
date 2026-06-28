@@ -220,7 +220,7 @@ async def list_users(offset: int = 0, pageSize: int = 20):
 @app.post("/v1/api/users")
 async def create_user(body: BrivoUserIn):
     now = datetime.now(timezone.utc)
-    user = BrivoUser(id=next_id("users"), created=now, updated=now, **body.model_dump())
+    user = BrivoUser(id=next_id("users"), created=now, updated=now, **body.model_dump(mode="python"))
     users[user.id] = user
     return user
 
