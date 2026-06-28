@@ -8,7 +8,7 @@ from app.brivo.client import (
     BrivoNotFoundError,
     BrivoRateLimitError,
 )
-from app.brivo.rate_limiter import make_limiter
+from aiolimiter import AsyncLimiter
 from app.models.brivo import (
     BrivoUser,
     BrivoGroup,
@@ -58,7 +58,7 @@ GROUP_WRITE = {
 
 
 def make_client(http):
-    return BrivoClient(http, make_limiter(1000))
+    return BrivoClient(http, AsyncLimiter(max_rate=1000, time_period=1))
 
 
 @pytest.mark.asyncio

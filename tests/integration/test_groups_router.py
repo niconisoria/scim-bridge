@@ -7,7 +7,7 @@ import respx
 
 from app.brivo.client import BrivoClient
 from app.brivo.dependencies import get_client
-from app.brivo.rate_limiter import make_limiter
+from aiolimiter import AsyncLimiter
 from app.redis.store import RedisStore, get_store
 
 AUTH = {"Authorization": "Bearer test-token"}
@@ -76,7 +76,7 @@ def brivo_mock():
 @pytest.fixture
 def brivo_client(brivo_mock):
     http = httpx.AsyncClient(base_url=BRIVO, headers={"api-key": "test"})
-    return BrivoClient(http, make_limiter(1000))
+    return BrivoClient(http, AsyncLimiter(max_rate=1000, time_period=1))
 
 
 @pytest.fixture

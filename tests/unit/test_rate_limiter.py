@@ -1,21 +1,8 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from aiolimiter import AsyncLimiter
 
 from app.brivo.client import BrivoNotFoundError, BrivoRateLimitError, brivo_retry
-from app.brivo.rate_limiter import make_limiter
-
-
-def test_make_limiter_returns_async_limiter_with_correct_max_rate():
-    limiter = make_limiter(15)
-    assert isinstance(limiter, AsyncLimiter)
-    assert limiter.max_rate == 15
-
-
-def test_make_limiter_respects_different_rates():
-    assert make_limiter(5).max_rate == 5
-    assert make_limiter(20).max_rate == 20
 
 
 @pytest.mark.asyncio

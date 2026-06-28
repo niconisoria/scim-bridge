@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 
+from aiolimiter import AsyncLimiter
+
 from app.brivo.client import BrivoClient, BrivoError
-from app.brivo.rate_limiter import make_limiter
 from app.core.auth import BearerTokenMiddleware
 from app.core.config import settings
 from app.core.logging import RequestLoggingMiddleware, configure_logging
@@ -23,7 +24,9 @@ async def lifespan(app: FastAPI):
         base_url=settings.brivo_base_url,
         headers={"api-key": "dev"},
     )
-    app.state.brivo_client = BrivoClient(http, make_limiter(settings.brivo_rate_limit))
+    app.state.brivo_client = BrivoClient(
+        http, AsyncLimiter(max_rate=settings.brivo_rate_limit, time_period=1)
+    )
     yield
     await http.aclose()
     await get_redis().aclose()
