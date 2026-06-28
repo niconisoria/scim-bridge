@@ -7,14 +7,14 @@ from fastapi.responses import JSONResponse
 
 from app.brivo.client import BrivoClient, paginate_all
 from app.brivo.dependencies import get_client
-from app.core.errors import ScimNotFound
-from app.models.brivo import BrivoGroupWrite
-from app.models.common import ListResponse, PatchOp, PatchRequest
+from app.models.common import ListResponse, PatchRequest
 from app.models.group import ScimGroup, ScimGroupResponse
 from app.brivo.fetch import fetch_group, fetch_group_members
 from app.redis.store import RedisStore, get_store
+from app.routers._helpers import resolve_or_404
 from app.services.add_members import add_members
 from app.services.create_group import create_group
+from app.services.patch_group import patch_replace_group
 from app.services.delete_group import delete_group
 from app.services.field_mapper import brivo_group_to_scim, hydrate_members
 from app.services.remove_members import remove_members
@@ -86,11 +86,7 @@ async def list_groups(
 
 @router.get("/{scim_id}")
 async def get_group(scim_id: str, store: Store, client: Client) -> ScimGroupResponse:
-    idmap = await store.get_by_scim("group", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"Group {scim_id!r} not found")
-    target_id = idmap["target_id"]
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id, created_at = await resolve_or_404("group", scim_id, store)
     return await _fetch_group_response(scim_id, target_id, created_at, store, client)
 
 
@@ -98,11 +94,7 @@ async def get_group(scim_id: str, store: Store, client: Client) -> ScimGroupResp
 async def put_group(
     scim_id: str, body: ScimGroup, store: Store, client: Client
 ) -> ScimGroupResponse:
-    idmap = await store.get_by_scim("group", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"Group {scim_id!r} not found")
-    target_id = idmap["target_id"]
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id, created_at = await resolve_or_404("group", scim_id, store)
     await update_group(int(target_id), scim_id, body, store, client)
     return await _fetch_group_response(scim_id, target_id, created_at, store, client)
 
@@ -111,15 +103,11 @@ async def put_group(
 async def patch_group(
     scim_id: str, body: PatchRequest, store: Store, client: Client
 ) -> ScimGroupResponse:
-    idmap = await store.get_by_scim("group", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"Group {scim_id!r} not found")
-    target_id = idmap["target_id"]
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id, created_at = await resolve_or_404("group", scim_id, store)
 
     for op in body.Operations:
         if op.op == "replace":
-            await _patch_replace(int(target_id), op, store, client)
+            await patch_replace_group(int(target_id), op, store, client)
         elif op.op == "add":
             await add_members(
                 int(target_id), _extract_member_ids(op.value), store, client
@@ -151,30 +139,6 @@ async def _fetch_group_response(
     location = f"/scim/v2/Groups/{scim_id}"
     return brivo_group_to_scim(brivo_group, scim_id, members, created_at, location)
 
-
-async def _patch_replace(
-    target_id: int, op: PatchOp, store: RedisStore, client: BrivoClient
-) -> None:
-    current = await fetch_group(str(target_id), store, client)
-
-    if op.path == "displayName":
-        new_name = op.value
-    else:
-        value = op.value or {}
-        new_name = (
-            value.get("displayName", current.name)
-            if isinstance(value, dict)
-            else current.name
-        )
-
-    write = BrivoGroupWrite(
-        name=new_name,
-        keypadUnlock=current.keypadUnlock,
-        immuneToAntipassback=current.immuneToAntipassback,
-        antipassbackResetTime=current.antipassbackResetTime,
-    )
-    await client.update_group(target_id, write)
-    await store.cache_del("group", str(target_id))
 
 
 def _extract_member_ids(value: Any) -> list[str]:

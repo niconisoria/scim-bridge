@@ -7,11 +7,11 @@ from fastapi.responses import JSONResponse
 
 from app.brivo.client import BrivoClient, paginate_all
 from app.brivo.dependencies import get_client
-from app.core.errors import ScimNotFound
 from app.models.common import ListResponse, PatchRequest
 from app.models.user import ScimUser, ScimUserResponse
 from app.brivo.fetch import fetch_user
 from app.redis.store import RedisStore, get_store
+from app.routers._helpers import resolve_or_404
 from app.services.create_user import create_user
 from app.services.delete_user import delete_user
 from app.services.field_mapper import brivo_user_to_scim
@@ -77,11 +77,7 @@ async def list_users(
 
 @router.get("/{scim_id}")
 async def get_user(scim_id: str, store: Store, client: Client) -> ScimUserResponse:
-    idmap = await store.get_by_scim("user", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"User {scim_id!r} not found")
-    target_id = idmap["target_id"]
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id, created_at = await resolve_or_404("user", scim_id, store)
 
     brivo_user = await fetch_user(target_id, store, client)
     location = f"/scim/v2/Users/{scim_id}"
@@ -92,11 +88,8 @@ async def get_user(scim_id: str, store: Store, client: Client) -> ScimUserRespon
 async def put_user(
     scim_id: str, body: ScimUser, store: Store, client: Client
 ) -> ScimUserResponse:
-    idmap = await store.get_by_scim("user", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"User {scim_id!r} not found")
-    target_id = int(idmap["target_id"])
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id_str, created_at = await resolve_or_404("user", scim_id, store)
+    target_id = int(target_id_str)
     brivo_user = await update_user(
         target_id, body=body, patch_ops=None, store=store, client=client
     )
@@ -108,11 +101,8 @@ async def put_user(
 async def patch_user(
     scim_id: str, body: PatchRequest, store: Store, client: Client
 ) -> ScimUserResponse:
-    idmap = await store.get_by_scim("user", scim_id)
-    if not idmap:
-        raise ScimNotFound(f"User {scim_id!r} not found")
-    target_id = int(idmap["target_id"])
-    created_at = datetime.fromisoformat(idmap["created_at"])
+    target_id_str, created_at = await resolve_or_404("user", scim_id, store)
+    target_id = int(target_id_str)
     brivo_user = await update_user(
         target_id, body=None, patch_ops=body.Operations, store=store, client=client
     )
