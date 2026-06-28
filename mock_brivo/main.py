@@ -245,7 +245,7 @@ async def update_user(userId: int, body: BrivoUserIn):
             status_code=404, content={"code": 404, "message": "Not found"}
         )
     updated = user.model_copy(
-        update={**body.model_dump(), "updated": datetime.now(timezone.utc)}
+        update={**body.model_dump(mode="python"), "updated": datetime.now(timezone.utc)}
     )
     users[userId] = updated
     return updated
