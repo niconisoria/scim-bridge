@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 from aiolimiter import AsyncLimiter
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from app.models.brivo import (
     BrivoGroup,
@@ -27,6 +28,14 @@ class BrivoRateLimitError(BrivoError):
     pass
 
 
+brivo_retry = retry(
+    retry=retry_if_exception_type(BrivoRateLimitError),
+    wait=wait_fixed(1),
+    stop=stop_after_attempt(4),
+    reraise=True,
+)
+
+
 class BrivoClient:
     def __init__(self, http: httpx.AsyncClient, limiter: AsyncLimiter):
         self._http = http
@@ -44,6 +53,7 @@ class BrivoClient:
             raise BrivoError(r.status_code, msg)
         return r
 
+    @brivo_retry
     async def _call(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         async with self._limiter:
             r = await self._http.request(method, url, **kwargs)
