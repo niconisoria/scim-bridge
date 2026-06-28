@@ -220,7 +220,7 @@ async def list_users(offset: int = 0, pageSize: int = 20):
 @app.post("/v1/api/users")
 async def create_user(body: BrivoUserIn):
     now = datetime.now(timezone.utc)
-    user = BrivoUser(id=next_id("users"), created=now, updated=now, **body.model_dump(mode="python"))
+    user = BrivoUser(id=next_id("users"), created=now, updated=now, **body.model_dump())
     users[user.id] = user
     return user
 
@@ -244,9 +244,12 @@ async def update_user(userId: int, body: BrivoUserIn):
         return JSONResponse(
             status_code=404, content={"code": 404, "message": "Not found"}
         )
-    updated = user.model_copy(
-        update={**body.model_dump(mode="python"), "updated": datetime.now(timezone.utc)}
-    )
+    updated = BrivoUser.model_validate({
+        "id": userId,
+        "created": user.created,
+        "updated": datetime.now(timezone.utc),
+        **body.model_dump(),
+    })
     users[userId] = updated
     return updated
 
