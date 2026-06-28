@@ -8,9 +8,9 @@ from fastapi.responses import JSONResponse
 from app.brivo.client import BrivoClient, paginate_all
 from app.brivo.dependencies import get_client
 from app.core.errors import ScimNotFound
-from app.models.brivo import BrivoUser
 from app.models.common import ListResponse, PatchRequest
 from app.models.user import ScimUser, ScimUserResponse
+from app.brivo.fetch import fetch_user
 from app.redis.store import RedisStore, get_store
 from app.services.create_user import create_user
 from app.services.delete_user import delete_user
@@ -83,15 +83,7 @@ async def get_user(scim_id: str, store: Store, client: Client) -> ScimUserRespon
     target_id = idmap["target_id"]
     created_at = datetime.fromisoformat(idmap["created_at"])
 
-    cached = await store.cache_get("user", target_id)
-    if cached:
-        brivo_user = BrivoUser.model_validate(cached)
-    else:
-        brivo_user = await client.get_user(int(target_id))
-        await store.cache_set(
-            "user", target_id, value=brivo_user.model_dump(mode="json")
-        )
-
+    brivo_user = await fetch_user(target_id, store, client)
     location = f"/scim/v2/Users/{scim_id}"
     return brivo_user_to_scim(brivo_user, scim_id, created_at, location)
 
@@ -142,7 +134,7 @@ async def _apply_filter(
         return []
     username = m.group(1).lower()
 
-    all_users: list[BrivoUser] = await paginate_all(client.list_users)
+    all_users = await paginate_all(client.list_users)
 
     results: list[ScimUserResponse] = []
     for bu in all_users:

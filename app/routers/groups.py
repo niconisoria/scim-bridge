@@ -8,9 +8,10 @@ from fastapi.responses import JSONResponse
 from app.brivo.client import BrivoClient, paginate_all
 from app.brivo.dependencies import get_client
 from app.core.errors import ScimNotFound
-from app.models.brivo import BrivoGroup, BrivoGroupWrite
+from app.models.brivo import BrivoGroupWrite
 from app.models.common import ListResponse, PatchOp, PatchRequest
 from app.models.group import ScimGroup, ScimGroupResponse
+from app.brivo.fetch import fetch_group, fetch_group_members
 from app.redis.store import RedisStore, get_store
 from app.services.add_members import add_members
 from app.services.create_group import create_group
@@ -144,23 +145,8 @@ async def _fetch_group_response(
     store: RedisStore,
     client: BrivoClient,
 ) -> ScimGroupResponse:
-    cached = await store.cache_get("group", target_id)
-    if cached:
-        brivo_group = BrivoGroup.model_validate(cached)
-    else:
-        brivo_group = await client.get_group(int(target_id))
-        await store.cache_set(
-            "group", target_id, value=brivo_group.model_dump(mode="json")
-        )
-
-    cached_members = await store.cache_get("group", target_id, "members")
-    if cached_members is not None:
-        target_ids = cached_members
-    else:
-        page = await client.list_group_users(int(target_id), page_size=200)
-        target_ids = [u.id for u in page.data]
-        await store.cache_set("group", target_id, "members", value=target_ids)
-
+    brivo_group = await fetch_group(target_id, store, client)
+    target_ids = await fetch_group_members(target_id, store, client)
     members = await hydrate_members(target_ids, store)
     location = f"/scim/v2/Groups/{scim_id}"
     return brivo_group_to_scim(brivo_group, scim_id, members, created_at, location)
@@ -169,11 +155,7 @@ async def _fetch_group_response(
 async def _patch_replace(
     target_id: int, op: PatchOp, store: RedisStore, client: BrivoClient
 ) -> None:
-    cached = await store.cache_get("group", str(target_id))
-    if cached:
-        current = BrivoGroup.model_validate(cached)
-    else:
-        current = await client.get_group(target_id)
+    current = await fetch_group(str(target_id), store, client)
 
     if op.path == "displayName":
         new_name = op.value
@@ -211,7 +193,7 @@ async def _apply_filter(
         return []
     display_name = m.group(1).lower()
 
-    all_groups: list[BrivoGroup] = await paginate_all(client.list_groups)
+    all_groups = await paginate_all(client.list_groups)
 
     results: list[ScimGroupResponse] = []
     for bg in all_groups:
