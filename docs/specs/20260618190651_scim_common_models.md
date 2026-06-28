@@ -1,6 +1,6 @@
 ---
 title: SCIM Common Models
-status: design
+status: implemented
 refs: [20260618133057_scim_user_models.md, 20260618143212_scim_group_models.md]
 ---
 

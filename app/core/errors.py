@@ -1,5 +1,7 @@
 from fastapi.responses import JSONResponse
 
+from app.models.common import ScimError
+
 
 class ScimBadRequest(Exception):
     def __init__(self, detail: str) -> None:
@@ -19,20 +21,14 @@ class ScimNotFound(Exception):
         super().__init__(detail)
 
 
-_SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 _SCIM_CONTENT_TYPE = "application/scim+json; charset=UTF-8"
 
 
 def scim_error(status: int, detail: str, scim_type: str | None = None) -> JSONResponse:
-    body: dict = {
-        "schemas": [_SCIM_ERROR_SCHEMA],
-        "status": str(status),
-        "detail": detail,
-    }
-    if scim_type is not None:
-        body["scimType"] = scim_type
     return JSONResponse(
-        content=body,
+        content=ScimError(
+            status=str(status), detail=detail, scimType=scim_type
+        ).model_dump(exclude_none=True),
         status_code=status,
         headers={"Content-Type": _SCIM_CONTENT_TYPE},
     )
