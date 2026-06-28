@@ -55,15 +55,19 @@ async def test_no_external_id_falls_back_to_username():
 
 
 @pytest.mark.asyncio
-async def test_duplicate_user_raises_conflict():
+async def test_duplicate_user_returns_existing():
     store = AsyncMock()
     store.get_by_external.return_value = {"scim_id": "existing", "target_id": "1"}
-    client = MagicMock()
+    store.cache_get.return_value = None
+    client = AsyncMock()
+    client.get_user.return_value = _brivo_user()
 
-    with pytest.raises(ScimConflict):
-        await create_user(_body(), store, client)
+    brivo_user, scim_id = await create_user(_body(), store, client)
 
+    assert scim_id == "existing"
+    assert brivo_user.id == 42
     store.acquire_lock.assert_not_called()
+    client.create_user.assert_not_called()
 
 
 @pytest.mark.asyncio

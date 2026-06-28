@@ -3,6 +3,7 @@ from uuid import uuid4
 from app.brivo.client import BrivoClient, BrivoNotFoundError
 from app.brivo.client import BrivoUser
 from app.core.errors import ScimConflict
+from app.brivo.fetch import fetch_user
 from app.models.user import ScimUser
 from app.redis.store import RedisStore
 from app.services.field_mapper import scim_user_to_brivo
@@ -18,8 +19,9 @@ async def create_user(
     scim_id = str(uuid4())
     brivo_write = scim_user_to_brivo(body)
 
-    if await store.get_by_external("user", external_id):
-        raise ScimConflict("User already exists")
+    if existing := await store.get_by_external("user", external_id):
+        brivo_user = await fetch_user(existing["target_id"], store, client)
+        return brivo_user, existing["scim_id"]
 
     if not await store.acquire_lock("user", external_id, scim_id):
         raise ScimConflict("User creation already in progress for this externalId")
