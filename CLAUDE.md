@@ -45,7 +45,7 @@ scim-bridge/
 │   ├── routers/            ← SCIM endpoints (users, groups)
 │   ├── models/             ← Pydantic schemas (SCIM resources)
 │   ├── services/           ← SCIM logic, saga orchestrator
-│   ├── brivo/              ← Brivo client + rate limiter
+│   ├── brivo/              ← Brivo client + FastAPI dependencies
 │   ├── redis/              ← ID mapping store + Brivo response cache
 │   └── core/               ← config, auth middleware, error handlers, logging
 ├── tests/
