@@ -8,7 +8,7 @@ from aiolimiter import AsyncLimiter
 from app.brivo.client import BrivoClient, BrivoError
 from app.core.auth import BearerTokenMiddleware
 from app.core.config import settings
-from app.core.logging import RequestLoggingMiddleware, configure_logging
+from app.core.logging import RequestLoggingMiddleware, configure_logging, get_logger
 from app.core.errors import ScimBadRequest, ScimConflict, ScimNotFound, scim_error
 from app.redis.store import get_redis
 from app.routers.discovery import router as discovery_router
@@ -59,9 +59,11 @@ async def _conflict(request: Request, exc: ScimConflict):
 
 @app.exception_handler(SagaError)
 async def _saga_error(request: Request, exc: SagaError):
+    get_logger().error("saga.error", method=request.method, path=request.url.path, error=str(exc))
     return scim_error(500, str(exc))
 
 
 @app.exception_handler(BrivoError)
 async def _brivo_error(request: Request, exc: BrivoError):
+    get_logger().error("brivo.error", method=request.method, path=request.url.path, brivo_status=exc.status_code, error=str(exc))
     return scim_error(502, str(exc))
