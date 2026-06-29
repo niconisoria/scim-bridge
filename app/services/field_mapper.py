@@ -24,6 +24,7 @@ def scim_user_to_brivo(user: ScimUser) -> BrivoUserWrite:
     )
 
     return BrivoUserWrite(
+        externalId=user.externalId,
         firstName=user.name.givenName if user.name else "",
         lastName=user.name.familyName if user.name else "",
         emails=[BrivoEmail(address=primary_email.value, type=primary_email.type)],
