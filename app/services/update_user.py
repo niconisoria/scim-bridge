@@ -40,7 +40,14 @@ def _apply_patch_ops(current: BrivoUser, ops: list[PatchOp]) -> BrivoUserWrite:
     for op in ops:
         if op.op != "replace":
             continue
-        if op.path == "active":
+        # Okta sends either path="active" value=bool, or path=None value={"active": bool}
+        if op.path is None and isinstance(op.value, dict):
+            if "active" in op.value:
+                suspended = not op.value["active"]
+            if "name" in op.value and isinstance(op.value["name"], dict):
+                first_name = op.value["name"].get("givenName", first_name)
+                last_name = op.value["name"].get("familyName", last_name)
+        elif op.path == "active":
             suspended = not op.value
         elif op.path == "name.givenName":
             first_name = op.value

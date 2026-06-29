@@ -210,6 +210,37 @@ async def test_cache_invalidated_after_update():
 
 
 @pytest.mark.asyncio
+async def test_patch_no_path_active_false_sets_suspended():
+    # Okta deactivation: {"op": "replace", "value": {"active": false}} (no path)
+    store = AsyncMock()
+    store.cache_get.return_value = None
+    current = _brivo_user(suspended=False)
+    client = AsyncMock()
+    client.get_user.return_value = current
+    client.update_user.return_value = current
+
+    await update_user(99, None, [_patch(None, {"active": False})], store, client)
+
+    write = client.update_user.call_args.args[1]
+    assert write.suspended is True
+
+
+@pytest.mark.asyncio
+async def test_patch_no_path_active_true_clears_suspended():
+    store = AsyncMock()
+    store.cache_get.return_value = None
+    current = _brivo_user(suspended=True)
+    client = AsyncMock()
+    client.get_user.return_value = current
+    client.update_user.return_value = current
+
+    await update_user(99, None, [_patch(None, {"active": True})], store, client)
+
+    write = client.update_user.call_args.args[1]
+    assert write.suspended is False
+
+
+@pytest.mark.asyncio
 async def test_brivo_error_propagates():
     store = AsyncMock()
     store.cache_get.return_value = None
