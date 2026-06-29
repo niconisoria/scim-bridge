@@ -10,6 +10,8 @@ Uvicorn access logs are suppressed (`--no-access-log`). Instead, `RequestLogging
 {"level": "info", "timestamp": "...", "event": "http.request", "method": "POST", "path": "/scim/v2/Users", "status": 201}
 ```
 
+Request body is not logged (stripped to avoid PII in logs).
+
 `configure_logging()` is called inside the FastAPI `lifespan` context manager, before any requests are served. Mock Brivo uses the same pattern with `_configure_logging()` and `_RequestLoggingMiddleware` (excludes `/health`).
 
 If `call_next` raises (unhandled exception escaping route + exception handlers), middleware logs `http.error` with `error` field and re-raises:
@@ -17,6 +19,8 @@ If `call_next` raises (unhandled exception escaping route + exception handlers),
 ```json
 {"event": "http.error", "method": "GET", "path": "/scim/v2/Users/123", "error": "503: Simulated error", "level": "error", "timestamp": "..."}
 ```
+
+Body is not included in error logs either.
 
 ## correlation_id Propagation
 
